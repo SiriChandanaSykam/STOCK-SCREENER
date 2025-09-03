@@ -219,14 +219,6 @@ with tab1:
     if st.button("🚀 **GENERATE PREDICTIONS**", type="primary"):
         try:
             with st.spinner(f'🧠 Analyzing {symbol}...'):
-                try:
-                    df = yf.download(symbol, period=period, progress=False, auto_adjust=True)
-                    if isinstance(df.columns, pd.MultiIndex):
-                        df.columns = [col[0] for col in df.columns.values]
-                except Exception as e:
-                    st.error(f"Data fetch error: {str(e)}")
-                    df = pd.DataFrame()
-                
                 if df.empty:
                     st.error("❌ Could not fetch data. Please check the symbol.")
                 else:
