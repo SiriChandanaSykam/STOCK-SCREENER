@@ -60,56 +60,7 @@ h1 {
 </style>
 """, unsafe_allow_html=True)
 
-def calculate_technical_indicators(df):
-    """Calculate technical indicators - SYNTAX ERROR FIXED"""
-    if df.empty or len(df) < 20:
-        return df
-    
-    try:
-        result_df = df.copy()
-        
-        # RSI calculation
-        close_series = result_df['Close']
-        delta = close_series.diff()
-        gain = delta.where(delta > 0, 0).rolling(window=14, min_periods=1).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
-        
-        loss = loss.replace(0, 1e-10)
-        rs = gain / loss
-        result_df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # Moving averages
-        result_df['SMA_20'] = close_series.rolling(20, min_periods=1).mean()
-        result_df['SMA_50'] = close_series.rolling(50, min_periods=1).mean()
-        result_df['EMA_20'] = close_series.ewm(span=20, adjust=False).mean()
-        
-        # MACD
-        ema12 = close_series.ewm(span=12, adjust=False).mean()
-        ema26 = close_series.ewm(span=26, adjust=False).mean()
-        result_df['MACD'] = ema12 - ema26
-        result_df['MACD_Signal'] = result_df['MACD'].ewm(span=9, adjust=False).mean()
-        
-        # Volume indicators
-        volume_series = result_df['Volume']
-        volume_ma = volume_series.rolling(20, min_periods=1).mean()
-        result_df['Volume_MA'] = volume_ma
-        volume_ma_safe = volume_ma.replace(0, 1e-10)
-        result_df['Volume_Ratio'] = volume_series / volume_ma_safe
-        
-        # Volatility
-        result_df['Volatility'] = close_series.rolling(20, min_periods=1).std()
-        
-        # Fill NaN values
-        numeric_columns = ['RSI', 'SMA_20', 'SMA_50', 'EMA_20', 'MACD', 'MACD_Signal', 'Volume_MA', 'Volume_Ratio', 'Volatility']
-        for col in numeric_columns:
-            if col in result_df.columns:
-                result_df[col] = result_df[col].fillna(method='forward').fillna(method='backward').fillna(0)
-        
-        return result_df
-        
-    except Exception as e:
-        st.error(f"Technical indicator error: {str(e)}")
-        return df
+
 
 def simple_prediction_model(df):
     """Prediction model - SYNTAX ERROR FIXED"""
