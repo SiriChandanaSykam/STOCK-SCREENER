@@ -7,6 +7,8 @@ import pytz
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
+from utils.data_fetcher import fetch_stock_data_with_fallback
+from utils.technicals import calculate_rsi, calculate_macd, calculate_smoothed_ma
 
 warnings.filterwarnings('ignore')
 
