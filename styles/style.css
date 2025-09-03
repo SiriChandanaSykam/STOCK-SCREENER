@@ -1,0 +1,410 @@
+/* TradingView Professional Dark Theme */```mport url('https://fonts.googleapis.com/css2?family=Trebuchet+MS:wght@400;500;600;700&display=swap');
+
+:root {
+    --tv-color-platform-background: #131722;
+    --tv-color-pane-background: #1e222d;
+    --tv-color-toolbar-background: #2a2e39;
+    --tv-color-text: #d1d4dc;
+    --tv-color-text-secondary: #787b86;
+    --tv-color-accent: #2962ff;
+    --tv-color-accent-hover: #1e53e5;
+    --tv-color-up: #26a69a;
+    --tv-color-down: #ef5350;
+    --tv-color-neutral: #ffb74d;
+    --tv-color-border: #434651;
+    --tv-color-hover: rgba(41, 98, 255, 0.08);
+    --tv-font-family: 'Trebuchet MS', 'Arial', sans-serif;
+    --tv-border-radius: 6px;
+    --tv-box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --tv-transition: all 0.2s ease;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+.stApp {
+    background: var(--tv-color-platform-background) !important;
+    color: var(--tv-color-text) !important;
+    font-family: var(--tv-font-family) !important;
+}
+
+.main > div {
+    padding-top: 1rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    gap: 0.5rem !important;
+}
+
+.block-container {
+    padding-top: 1rem !important;
+    padding-bottom: 1rem !important;
+    max-width: none !important;
+}
+
+/* Header Styling */
+h1 {
+    color: var(--tv-color-accent) !important;
+    font-family: var(--tv-font-family) !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+    font-size: 2.5rem !important;
+    margin: 0 0 1rem 0 !important;
+    text-shadow: 0 2px 4px rgba(41, 98, 255, 0.3);
+}
+
+h2, h3, h4 {
+    color: var(--tv-color-text) !important;
+    font-family: var(--tv-font-family) !important;
+    font-weight: 600 !important;
+}
+
+/* Sidebar Styling */
+.css-1d391kg {
+    background: var(--tv-color-pane-background) !important;
+    border-right: 1px solid var(--tv-color-border) !important;
+}
+
+.sidebar .sidebar-content {
+    background: var(--tv-color-pane-background) !important;
+}
+
+/* Button Styling */
+.stButton > button {
+    background: var(--tv-color-accent) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--tv-border-radius) !important;
+    font-weight: 600 !important;
+    font-family: var(--tv-font-family) !important;
+    padding: 0.75rem 1.5rem !important;
+    transition: var(--tv-transition) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    width: 100% !important;
+    cursor: pointer !important;
+    box-shadow: var(--tv-box-shadow) !important;
+}
+
+.stButton > button:hover {
+    background: var(--tv-color-accent-hover) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(41, 98, 255, 0.4) !important;
+}
+
+.stButton > button:focus {
+    box-shadow: 0 0 0 2px rgba(41, 98, 255, 0.5) !important;
+    outline: none !important;
+}
+
+/* Trading Cards */
+.tv-card {
+    background: var(--tv-color-pane-background) !important;
+    border: 1px solid var(--tv-color-border) !important;
+    border-radius: var(--tv-border-radius) !important;
+    padding: 1rem !important;
+    margin: 0.5rem 0 !important;
+    text-align: center !important;
+    transition: var(--tv-transition) !important;
+    box-shadow: var(--tv-box-shadow) !important;
+    position: relative !important;
+}
+
+.tv-card:hover {
+    border-color: var(--tv-color-accent) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 16px rgba(41, 98, 255, 0.2) !important;
+}
+
+.tv-card h4 {
+    color: var(--tv-color-text-secondary) !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    margin-bottom: 0.5rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+}
+
+.tv-card h2 {
+    color: var(--tv-color-text) !important;
+    font-size: 1.8rem !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    font-family: var(--tv-font-family) !important;
+}
+
+.tv-card p {
+    color: var(--tv-color-text-secondary) !important;
+    font-size: 0.75rem !important;
+    margin-top: 0.5rem !important;
+    font-weight: 500 !important;
+}
+
+.tv-card.bullish {
+    border-color: var(--tv-color-up) !important;
+    background: linear-gradient(135deg, var(--tv-color-pane-background), rgba(38, 166, 154, 0.05)) !important;
+}
+
+.tv-card.bullish h2 {
+    color: var(--tv-color-up) !important;
+}
+
+.tv-card.bearish {
+    border-color: var(--tv-color-down) !important;
+    background: linear-gradient(135deg, var(--tv-color-pane-background), rgba(239, 83, 80, 0.05)) !important;
+}
+
+.tv-card.bearish h2 {
+    color: var(--tv-color-down) !important;
+}
+
+.tv-card.neutral {
+    border-color: var(--tv-color-neutral) !important;
+    background: linear-gradient(135deg, var(--tv-color-pane-background), rgba(255, 183, 77, 0.05)) !important;
+}
+
+.tv-card.neutral h2 {
+    color: var(--tv-color-neutral) !important;
+}
+
+/* Tabs Styling */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0 !important;
+    background: var(--tv-color-toolbar-background) !important;
+    border-radius: var(--tv-border-radius) !important;
+    padding: 0.25rem !important;
+    border: 1px solid var(--tv-color-border) !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--tv-border-radius) !important;
+    color: var(--tv-color-text-secondary) !important;
+    font-weight: 600 !important;
+    padding: 0.75rem 1.25rem !important;
+    margin: 0.125rem !important;
+    transition: var(--tv-transition) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    font-family: var(--tv-font-family) !important;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    background: var(--tv-color-hover) !important;
+    color: var(--tv-color-text) !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: var(--tv-color-accent) !important;
+    color: white !important;
+    border-color: var(--tv-color-accent) !important;
+    box-shadow: 0 2px 8px rgba(41, 98, 255, 0.3) !important;
+}
+
+/* DataFrames */
+.dataframe {
+    background: var(--tv-color-pane-background) !important;
+    border: 1px solid var(--tv-color-border) !important;
+    border-radius: var(--tv-border-radius) !important;
+    font-family: var(--tv-font-family) !important;
+    box-shadow: var(--tv-box-shadow) !important;
+}
+
+.dataframe > div {
+    border-radius: var(--tv-border-radius) !important;
+    overflow: hidden !important;
+}
+
+.dataframe table {
+    background: var(--tv-color-pane-background) !important;
+    color: var(--tv-color-text) !important;
+}
+
+.dataframe th {
+    background: var(--tv-color-toolbar-background) !important;
+    color: var(--tv-color-text) !important;
+    font-weight: 600 !important;
+    padding: 0.75rem !important;
+    border-bottom: 1px solid var(--tv-color-border) !important;
+}
+
+.dataframe td {
+    padding: 0.5rem 0.75rem !important;
+    border-bottom: 1px solid var(--tv-color-border) !important;
+}
+
+.dataframe tr:nth-child(even) {
+    background: rgba(30, 34, 45, 0.3) !important;
+}
+
+.dataframe tr:hover {
+    background: var(--tv-color-hover) !important;
+}
+
+/* Input Fields */
+.stSelectbox > div > div,
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input {
+    background: var(--tv-color-pane-background) !important;
+    border: 1px solid var(--tv-color-border) !important;
+    border-radius: var(--tv-border-radius) !important;
+    color: var(--tv-color-text) !important;
+    font-family: var(--tv-font-family) !important;
+    font-weight: 500 !important;
+    padding: 0.5rem 0.75rem !important;
+    transition: var(--tv-transition) !important;
+}
+
+.stTextInput > div > div > input:focus,
+.stSelectbox > div > div:focus-within {
+    border-color: var(--tv-color-accent) !important;
+    box-shadow: 0 0 0 2px rgba(41, 98, 255, 0.2) !important;
+}
+
+/* Sliders */
+.stSlider > div > div > div > div {
+    background: var(--tv-color-accent) !important;
+}
+
+.stSlider > div > div > div[role="slider"] {
+    background: var(--tv-color-accent) !important;
+}
+
+/* Checkboxes and Radio */
+.stCheckbox > div,
+.stRadio > div {
+    background: rgba(30, 34, 45, 0.5) !important;
+    border-radius: var(--tv-border-radius) !important;
+    padding: 0.75rem !important;
+    border: 1px solid var(--tv-color-border) !important;
+}
+
+/* Alerts */
+.stSuccess {
+    background: linear-gradient(135deg, rgba(38, 166, 154, 0.1), rgba(38, 166, 154, 0.05)) !important;
+    border: 1px solid var(--tv-color-up) !important;
+    border-radius: var(--tv-border-radius) !important;
+    color: var(--tv-color-text) !important;
+}
+
+.stWarning {
+    background: linear-gradient(135deg, rgba(255, 183, 77, 0.1), rgba(255, 183, 77, 0.05)) !important;
+    border: 1px solid var(--tv-color-neutral) !important;
+    border-radius: var(--tv-border-radius) !important;
+    color: var(--tv-color-text) !important;
+}
+
+.stError {
+    background: linear-gradient(135deg, rgba(239, 83, 80, 0.1), rgba(239, 83, 80, 0.05)) !important;
+    border: 1px solid var(--tv-color-down) !important;
+    border-radius: var(--tv-border-radius) !important;
+    color: var(--tv-color-text) !important;
+}
+
+.stInfo {
+    background: linear-gradient(135deg, rgba(41, 98, 255, 0.1), rgba(41, 98, 255, 0.05)) !important;
+    border: 1px solid var(--tv-color-accent) !important;
+    border-radius: var(--tv-border-radius) !important;
+    color: var(--tv-color-text) !important;
+}
+
+/* Market Status */
+.tv-market-status {
+    background: linear-gradient(45deg, var(--tv-color-accent), var(--tv-color-up)) !important;
+    color: white !important;
+    padding: 0.75rem 1.5rem !important;
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+    margin: 1rem 0 !important;
+    animation: pulse 2s infinite !important;
+    box-shadow: 0 4px 12px rgba(41, 98, 255, 0.3) !important;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.02); opacity: 0.9; }
+}
+
+/* Alert Notifications */
+.tv-alert {
+    background: linear-gradient(45deg, var(--tv-color-down), var(--tv-color-neutral)) !important;
+    color: white !important;
+    padding: 1rem !important;
+    border-radius: var(--tv-border-radius) !important;
+    margin: 0.5rem 0 !important;
+    font-weight: 600 !important;
+    text-align: center !important;
+    animation: glow 1.5s infinite alternate !important;
+    box-shadow: 0 4px 16px rgba(239, 83, 80, 0.4) !important;
+}
+
+@keyframes glow {
+    from { box-shadow: 0 0 10px rgba(239, 83, 80, 0.5); }
+    to { box-shadow: 0 0 20px rgba(255, 183, 77, 0.8); }
+}
+
+/* Spacing and Layout */
+.element-container {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.stColumns {
+    gap: 0.75rem !important;
+}
+
+.stColumn {
+    padding: 0.25rem !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--tv-color-platform-background);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--tv-color-border);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--tv-color-accent);
+}
+
+/* Custom Classes for App */
+.tv-header {
+    background: var(--tv-color-pane-background) !important;
+    border: 1px solid var(--tv-color-border) !important;
+    border-radius: var(--tv-border-radius) !important;
+    padding: 1rem !important;
+    margin-bottom: 1rem !important;
+    text-align: center !important;
+    box-shadow: var(--tv-box-shadow) !important;
+}
+
+.tv-footer {
+    background: var(--tv-color-pane-background) !important;
+    border: 1px solid var(--tv-color-border) !important;
+    border-radius: var(--tv-border-radius) !important;
+    padding: 2rem !important;
+    margin-top: 2rem !important;
+    text-align: center !important;
+    box-shadow: var(--tv-box-shadow) !important;
+}
+
+/* Chart Container */
+.tv-chart-container {
+    background: var(--tv-color-pane-background) !important;
+    border: 1px solid var(--tv-color-border) !important;
+    border-radius: var(--tv-border-radius) !important;
+    padding: 1rem !important;
+    margin: 1rem 0 !important;
+    box-shadow: var(--tv-box-shadow) !important;
+}

@@ -1,0 +1,342 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import pandas_ta as ta
+from datetime import datetime, timedelta
+import time
+import pytz
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# --- Utility Functions ---
+@st.cache_data(ttl=300)
+def get_nse_stock_list():
+    """Provides a list of NSE stock symbols to scan."""
+    return [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
+        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS",
+        "ASIANPAINT.NS", "LT.NS", "AXISBANK.NS", "MARUTI.NS", "SUNPHARMA.NS",
+        "WIPRO.NS", "ULTRACEMCO.NS", "TITAN.NS", "HCLTECH.NS", "ONGC.NS",
+        "BAJFINANCE.NS", "M&M.NS", "POWERGRID.NS", "NTPC.NS", "JSWSTEEL.NS",
+        "TATASTEEL.NS", "TECHM.NS", "NESTLEIND.NS", "COALINDIA.NS", "BAJAJFINSV.NS",
+        "ADANIENT.NS", "HDFCLIFE.NS", "SBILIFE.NS", "BPCL.NS", "GRASIM.NS",
+        "TATAMOTORS.NS", "INDUSINDBK.NS", "CIPLA.NS", "EICHERMOT.NS", "IOC.NS"
+    ]
+
+@st.cache_data(ttl=300)
+def get_stock_data(symbol, period="6mo"):
+    """Safely fetches stock data from Yahoo Finance and fixes MultiIndex issues."""
+    try:
+        data = yf.download(symbol, period=period, progress=False, auto_adjust=True)
+        
+        # Fix MultiIndex columns issue
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ['_'.join(col).strip() for col in data.columns.values]
+        
+        # Ensure we have the basic columns we need
+        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in required_cols:
+            if col not in data.columns:
+                # Try to find the column with suffix
+                matching_cols = [c for c in data.columns if col.lower() in c.lower()]
+                if matching_cols:
+                    data[col] = data[matching_cols[0]]
+        
+        return data
+    except Exception as e:
+        print(f"Error fetching data for {symbol}: {str(e)}")
+        return pd.DataFrame()
+
+def is_market_open():
+    """Check if NSE is currently open (IST)."""
+    IST = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(IST)
+    if now.weekday() >= 5:  # Saturday or Sunday
+        return False
+    market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return market_open <= now <= market_close
+
+def calculate_rsi(data, window=14):
+    """Calculate RSI manually to avoid pandas-ta issues."""
+    delta = data['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_macd(data, fast=12, slow=26, signal=9):
+    """Calculate MACD manually."""
+    exp1 = data['Close'].ewm(span=fast).mean()
+    exp2 = data['Close'].ewm(span=slow).mean()
+    macd = exp1 - exp2
+    signal_line = macd.ewm(span=signal).mean()
+    histogram = macd - signal_line
+    return macd, signal_line, histogram
+
+def calculate_obv(data):
+    """Calculate On-Balance Volume manually."""
+    obv = [0]
+    for i in range(1, len(data)):
+        if data['Close'].iloc[i] > data['Close'].iloc[i-1]:
+            obv.append(obv[-1] + data['Volume'].iloc[i])
+        elif data['Close'].iloc[i] < data['Close'].iloc[i-1]:
+            obv.append(obv[-1] - data['Volume'].iloc[i])
+        else:
+            obv.append(obv[-1])
+    return pd.Series(obv, index=data.index)
+
+def analyze_stock_potential(symbol):
+    """Analyzes a stock for bullish technical signals using manual calculations."""
+    try:
+        data = get_stock_data(symbol)
+        if data.empty or len(data) < 50:
+            return None, None, None
+
+        # Calculate indicators manually to avoid MultiIndex issues
+        data['RSI_14'] = calculate_rsi(data)
+        data['MACD'], data['MACD_Signal'], data['MACD_Histogram'] = calculate_macd(data)
+        data['OBV'] = calculate_obv(data)
+        data['SMA_20'] = data['Close'].rolling(window=20).mean()
+        data['SMA_50'] = data['Close'].rolling(window=50).mean()
+        
+        # Drop NaN values
+        data.dropna(inplace=True)
+        
+        if len(data) < 10:  # Need some data after indicators
+            return None, None, None
+
+        latest = data.iloc[-1]
+        score = 0
+        conditions = []
+
+        # Condition 1: RSI is healthy and rising
+        if latest['RSI_14'] > 50 and latest['RSI_14'] > data['RSI_14'].iloc[-2]:
+            score += 1
+            conditions.append("✅ RSI is strong and rising")
+
+        # Condition 2: MACD Bullish 
+        if latest['MACD'] > latest['MACD_Signal']:
+            score += 1
+            conditions.append("✅ MACD bullish crossover")
+
+        # Condition 3: OBV trending up
+        if data['OBV'].iloc[-5:].pct_change().fillna(0).mean() > 0:
+            score += 1
+            conditions.append("✅ OBV indicates buying pressure")
+
+        # Condition 4: Volume above average
+        if latest['Volume'] > data['Volume'].iloc[-21:-1].mean():
+            score += 1
+            conditions.append("✅ Volume is above 20-day average")
+
+        # Condition 5: Golden Cross
+        if latest['SMA_20'] > latest['SMA_50']:
+            score += 1
+            conditions.append("✅ Golden Cross signal (SMA 20 > SMA 50)")
+
+        if score >= 3:
+            return data, score, conditions
+        return None, None, None
+
+    except Exception as e:
+        print(f"Error processing {symbol}: {str(e)}")
+        return None, None, None
+
+def create_stock_chart(df, symbol):
+    """Creates a Plotly technical analysis chart."""
+    fig = make_subplots(
+        rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+        row_heights=[0.6, 0.2, 0.2],
+        subplot_titles=('Price & Moving Averages', 'RSI', 'MACD')
+    )
+
+    # Price and Moving Averages
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['Close'], name='Close Price',
+        line=dict(color='dodgerblue', width=2)), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['SMA_20'], name='20-Day MA',
+        line=dict(color='orange', dash='dash')), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['SMA_50'], name='50-Day MA',
+        line=dict(color='red', dash='dash')), row=1, col=1)
+
+    # RSI
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['RSI_14'], name='RSI',
+        line=dict(color='purple')), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1, opacity=0.5)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1, opacity=0.5)
+
+    # MACD
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['MACD'], name='MACD',
+        line=dict(color='cyan')), row=3, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['MACD_Signal'], name='Signal',
+        line=dict(color='magenta')), row=3, col=1)
+    fig.add_trace(go.Bar(
+        x=df.index, y=df['MACD_Histogram'], name='Histogram',
+        marker_color='gray', opacity=0.6), row=3, col=1)
+
+    # Layout
+    fig.update_layout(
+        title=f'{symbol} - Technical Analysis Dashboard',
+        height=800,
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    fig.update_yaxes(title_text="Price (₹)", row=1, col=1)
+    fig.update_yaxes(title_text="RSI", row=2, col=1, range=[0, 100])
+    fig.update_yaxes(title_text="MACD", row=3, col=1)
+    
+    return fig
+
+# --- Streamlit Web Interface ---
+
+st.set_page_config(
+    page_title="Top Gainer Estimator", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.title('📈 NSE Top Gainer Estimator')
+
+# Sidebar info
+with st.sidebar:
+    st.markdown("### About This App")
+    st.markdown("""
+    This application analyzes NSE stocks using technical indicators to identify potential top gainers.
+    
+    **Analysis Criteria:**
+    - RSI momentum
+    - MACD signals  
+    - Volume analysis
+    - Moving average crossovers
+    - On-Balance Volume trends
+    """)
+
+# Show market hours context and time
+IST = pytz.timezone('Asia/Kolkata')
+current_time_ist = datetime.now(IST).strftime('%d-%b-%Y, %I:%M %p')
+mkt_status = "🟢 Market is OPEN" if is_market_open() else "⚪ Market is CLOSED"
+
+col1, col2 = st.columns([2, 1])
+with col1:
+    st.write(f"**{mkt_status}** &nbsp; | *Last updated: {current_time_ist} (IST)*")
+with col2:
+    if st.button('🔄 Refresh Data', help="Clear cache and refresh"):
+        st.cache_data.clear()
+        st.rerun()
+
+st.write("Analyzing Nifty 50 stocks for bullish technical signals to estimate potential gainers.")
+
+if 'scan_results' not in st.session_state:
+    st.session_state.scan_results = None
+
+if st.button('🚀 Start Analysis', type="primary", use_container_width=True):
+    with st.spinner('Analyzing stocks... Please wait.'):
+        stock_list = get_nse_stock_list()
+        results = []
+        progress_bar = st.progress(0, text="Initializing analysis...")
+
+        for i, symbol in enumerate(stock_list):
+            status_text = f"Analyzing {symbol.replace('.NS', '')} ({i+1}/{len(stock_list)})..."
+            progress_bar.progress((i + 1) / len(stock_list), text=status_text)
+            
+            data, score, conditions = analyze_stock_potential(symbol)
+            if data is not None and score is not None:
+                latest_info = data.iloc[-1]
+                results.append({
+                    'Symbol': symbol.replace('.NS', ''),
+                    'Close Price (₹)': f"₹{latest_info['Close']:.2f}",
+                    'Potential Score': f"{score}/5",
+                    'Bullish Signals': ", ".join(conditions),
+                    'Full Data': data
+                })
+            time.sleep(0.1)  # Rate limiting
+
+        progress_bar.empty()
+        st.session_state.scan_results = results
+
+if st.session_state.scan_results is not None:
+    results = st.session_state.scan_results
+    if results:
+        st.success(f"✅ Analysis complete! Found **{len(results)}** stocks with high potential.")
+
+        # Display results table
+        display_df = pd.DataFrame(results).drop(columns=['Full Data'])
+        display_df = display_df.sort_values('Potential Score', ascending=False).reset_index(drop=True)
+        
+        st.dataframe(
+            display_df, 
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Symbol": st.column_config.TextColumn("Stock Symbol", width="small"),
+                "Close Price (₹)": st.column_config.TextColumn("Latest Price", width="small"),
+                "Potential Score": st.column_config.TextColumn("Score", width="small"),
+                "Bullish Signals": st.column_config.TextColumn("Technical Signals", width="large")
+            }
+        )
+
+        st.subheader("📊 Detailed Technical Analysis")
+        
+        selected_symbol = st.selectbox(
+            "Select a stock for detailed chart analysis:",
+            options=[res['Symbol'] for res in results],
+            help="Choose a stock to view its technical chart and analysis"
+        )
+
+        if selected_symbol:
+            # Find the full data for selected stock
+            selected_data = next((item for item in results if item["Symbol"] == selected_symbol), None)
+            
+            if selected_data:
+                col1, col2 = st.columns([1, 2])
+                
+                with col1:
+                    st.markdown(f"### {selected_symbol}")
+                    st.markdown("**Bullish Signals Detected:**")
+                    for signal in selected_data['Bullish Signals'].split(', '):
+                        st.markdown(f"- {signal}")
+                    
+                    with st.expander("📚 Understanding Technical Indicators"):
+                        st.markdown("""
+                        **RSI (Relative Strength Index)**  
+                        Measures momentum. Values > 50 suggest bullish momentum.
+                        
+                        **MACD (Moving Average Convergence Divergence)**  
+                        When MACD line is above signal line, it indicates bullish momentum.
+                        
+                        **OBV (On-Balance Volume)**  
+                        Rising OBV suggests accumulation and buying pressure.
+                        
+                        **Volume Analysis**  
+                        Higher than average volume shows increased interest.
+                        
+                        **Golden Cross**  
+                        Strong bullish signal when 20-day MA crosses above 50-day MA.
+                        """)
+
+                with col2:
+                    chart_data = selected_data['Full Data']
+                    fig = create_stock_chart(chart_data, selected_symbol)
+                    st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("📈 Analysis complete. No stocks met the high-potential criteria at this time.")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center'>
+<small><strong>⚠️ Disclaimer:</strong> This tool provides technical analysis for educational purposes only. 
+Always do your own research and consult financial advisors before making investment decisions.</small>
+</div>
+""", unsafe_allow_html=True)
