@@ -219,6 +219,7 @@ with tab1:
     if st.button("🚀 **GENERATE PREDICTIONS**", type="primary"):
         try:
             with st.spinner(f'🧠 Analyzing {symbol}...'):
+                df = fetch_stock_data_with_fallback(symbol, period=period)
                 if df.empty:
                     st.error("❌ Could not fetch data. Please check the symbol.")
                 else:
