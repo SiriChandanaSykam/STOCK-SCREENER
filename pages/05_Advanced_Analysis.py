@@ -225,7 +225,20 @@ with tab1:
                 else:
                     st.success(f"✅ Loaded {len(df)} days of data")
                     
-                    df_with_indicators = calculate_technical_indicators(df)
+                   df_with_indicators = df.copy() # Start with a copy
+if not df_with_indicators.empty:
+    close_prices = df_with_indicators['Close'].values
+    
+    # Calculate indicators using utils and add them as new columns
+    df_with_indicators['RSI'] = pd.Series(calculate_rsi(close_prices), index=df_with_indicators.index)
+    macd_line, signal_line = calculate_macd(close_prices)
+    df_with_indicators['MACD'] = pd.Series(macd_line, index=df_with_indicators.index)
+    df_with_indicators['MACD_Signal'] = pd.Series(signal_line, index=df_with_indicators.index)
+    df_with_indicators['SMA_20'] = pd.Series(calculate_smoothed_ma(close_prices, 20), index=df_with_indicators.index)
+    df_with_indicators['SMA_50'] = pd.Series(calculate_smoothed_ma(close_prices, 50), index=df_with_indicators.index)
+    
+    # Drop any rows with NaN values that were created during calculation
+    df_with_indicators.dropna(inplace=True)
                     predicted_change, confidence, signals = simple_prediction_model(df_with_indicators)
                     
                     try:
