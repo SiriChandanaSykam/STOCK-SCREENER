@@ -9,7 +9,7 @@ if project_root not in sys.path:
 import streamlit as st
 
 def load_css():
-    with open('style.css') as f:
+    with open('styles/style.css') as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 st.set_page_config(page_title="TradingView Pro Screener", layout="wide")

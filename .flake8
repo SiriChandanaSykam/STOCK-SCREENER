@@ -1,0 +1,20 @@
+max-line-length = 100
+extend-ignore =
+E203, # whitespace before ':' (PEP 8 vs black/plotly style)
+W293 # blank line contains whitespace (optional)
+exclude =
+.git,
+pycache,
+.venv,
+venv,
+env,
+.eggs,
+.mypy_cache,
+.pytest_cache,
+build,
+dist,
+.idea,
+.vscode
+
+per-file-ignores =
+utils/symbol_universe.py:F821

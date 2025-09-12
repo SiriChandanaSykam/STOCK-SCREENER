@@ -1,7 +1,7 @@
 import streamlit as st
 from utils.symbol_universe import load_all_symbols
 from utils.score_engine import score_stock
-from utils.data_fetcher import fetch_stock_data
+from utils.data_fetcher import fetch_stock_data_with_fallback
 from utils.charting import create_tv_chart
 
 def app():
@@ -20,7 +20,7 @@ def app():
             
             filtered_results = []
             for sym, name in stocks.items():
-                df = fetch_stock_data(sym)
+                df = fetch_stock_data_with_fallback(sym)
                 if df.empty:
                     continue
                 score, signals = score_stock(df)

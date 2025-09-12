@@ -7,7 +7,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 import streamlit as st
-from utils.data_fetcher import fetch_stock_data
+from utils.data_fetcher import fetch_stock_data_with_fallback
 from utils.score_engine import score_stock
 from utils.charting import create_tv_chart
 
