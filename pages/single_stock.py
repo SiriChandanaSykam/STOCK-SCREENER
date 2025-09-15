@@ -1,5 +1,10 @@
 import streamlit as st
-from utils.data_fetcher import fetch_stock_data_with_fallback
+
+from utils.data_fetcher import fetch_stock_data_with_fallback  # add this import
+
+# ... later where data is fetched
+  # replace old name
+
 
 from utils.score_engine import score_stock
 from utils.charting import create_tv_chart
@@ -9,7 +14,7 @@ def app():
     sym = st.text_input("Enter Stock Symbol (e.g., RELIANCE.NS)", value="RELIANCE.NS")
     
     if sym:
-        df = fetch_stock_data(sym)
+        df = fetch_stock_data_with_fallback(sym)
         if df.empty:
             st.error(f"No data found for {sym}. Please check symbol and try again.")
             return
