@@ -1,6 +1,11 @@
 import sys
 import os
 
+from utils.data_fetcher import fetch_stock_data_with_fallback  # add this import
+
+# ... later where data is fetched  # replace old name
+
+
 # Add project root to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
@@ -30,7 +35,7 @@ def app():
     
     st.write("## Your Watchlist")
     for sym in st.session_state['watchlist']:
-        df = fetch_stock_data(sym)
+        df = fetch_stock_data_with_fallback(sym)
         if df.empty:
             st.warning(f"No data for {sym}")
             continue
