@@ -36,7 +36,7 @@ def create_tv_chart(df, symbol):
         fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name='Signal', line=dict(color=colors['signal'], width=2)), row=3, col=1)
 
     # Volume bars
-    volume_colors = [colors['up'] if df['Close'][i] >= df['Open'][i] else colors['down'] for i in range(len(df))]
+    volume_colors = [colors['up'] if df['Close'].iloc[i] >= df['Open'].iloc[i] else colors['down'] for i in range(len(df))]
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=volume_colors, name='Volume'), row=4, col=1)
 
     fig.update_layout(

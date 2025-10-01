@@ -1,227 +1,165 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import warnings
+
+# Local utils
 from utils.data_fetcher import fetch_stock_data_with_fallback
 from utils.technicals import calculate_rsi, calculate_macd, calculate_smoothed_ma
 
-warnings.filterwarnings('ignore')
+# Always render a title so page is never blank
+st.title("🚀 Market Predictor Pro")
 
-st.set_page_config(page_title="Market Predictor Pro", layout="wide")
-
-# CSS Styling
-st.markdown("""
-<style>
-.stApp {
-    background: linear-gradient(135deg, #0c1426 0%, #131722 25%, #1a1e2e 100%);
-    color: #d1d4dc;
-    font-family: 'Inter', sans-serif;
-}
-h1 {
-    background: linear-gradient(45deg, #2962ff, #00d4aa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-weight: 700;
-    text-align: center;
-}
-.prediction-card {
-    background: linear-gradient(135deg, #1a1e2e 0%, #161b2b 100%);
-    border: 2px solid #2962ff;
-    border-radius: 16px;
-    padding: 1.5rem;
-    text-align: center;
-    margin: 1rem 0;
-}
-.prediction-card h4 { color: #8b949e; font-size: 0.9rem; margin-bottom: 0.5rem; }
-.prediction-card h2 { color: #ffffff; font-size: 2rem; margin: 0; }
-.prediction-card p { color: #8b949e; font-size: 0.85rem; margin-top: 0.5rem; }
-.bullish { border-color: #00d4aa; }
-.bullish h2 { color: #00d4aa; }
-.bearish { border-color: #ff4976; }
-.bearish h2 { color: #ff4976; }
-.neutral { border-color: #ffa726; }
-.neutral h2 { color: #ffa726; }
-.stButton > button {
-    background: linear-gradient(45deg, #2962ff 0%, #00d4aa 100%);
-    border: none;
-    border-radius: 12px;
-    color: #ffffff;
-    font-weight: 700;
-    text-transform: uppercase;
-}
-</style>
-""", unsafe_allow_html=True)
-
-def simple_prediction_model(df):
-    """Prediction model - uses pre-calculated indicators."""
-    try:
-        if df.empty or len(df) < 30:
-            return 0, 0, ["Insufficient data"]
-        
-        latest_idx = df.index[-1]
-        
-        def safe_get(column_name, default=0):
-            try:
-                if column_name in df.columns:
-                    value = df.loc[latest_idx, column_name]
-                    return float(value) if pd.notna(value) else default
-                return default
-            except:
-                return default
-        
-        score = 0
-        signals = []
-        
-        # RSI signals
-        rsi = safe_get('RSI', 50)
-        if rsi < 30:
-            score += 15
-            signals.append("RSI Oversold - Buy Signal")
-        elif rsi > 70:
-            score -= 10
-            signals.append("RSI Overbought - Caution")
-        elif 45 <= rsi <= 55:
-            score += 5
-            signals.append("RSI Neutral")
-        
-        # MACD signals
-        macd = safe_get('MACD', 0)
-        macd_signal = safe_get('MACD_Signal', 0)
-        if macd > macd_signal:
-            score += 15
-            signals.append("MACD Bullish")
-        else:
-            score -= 5
-            signals.append("MACD Bearish")
-        
-        # Moving average signals
-        close = safe_get('Close', 0)
-        sma20 = safe_get('SMA_20', 0)
-        sma50 = safe_get('SMA_50', 0)
-        
-        if close > 0 and sma20 > 0 and sma50 > 0:
-            if close > sma20 and sma20 > sma50:
-                score += 20
-                signals.append("Strong Uptrend")
-            elif close > sma20:
-                score += 10
-                signals.append("Short-term Bullish")
-            else:
-                score -= 10
-                signals.append("Below Moving Averages")
-        
-        # You might need to add Volume_Ratio calculation if you use it here
-        
-        score = max(0, min(100, score))
-        confidence = score
-        
-        close_series = df['Close']
-        returns = close_series.pct_change().dropna()
-        recent_changes = float(returns.tail(5).mean()) if len(returns) >= 5 else 0
-        
-        if score > 70:
-            predicted_change = recent_changes * 1.5 + 0.01
-        elif score < 30:
-            predicted_change = recent_changes * 0.5 - 0.01
-        else:
-            predicted_change = recent_changes
-            
-        predicted_change = max(-0.1, min(0.1, predicted_change))
-        
-        return predicted_change, confidence, signals
-        
-    except Exception as e:
-        st.error(f"Prediction error: {str(e)}")
-        return 0, 50, ["Error in analysis"]
-
-def monte_carlo_simple(current_price, volatility, drift, days=30, simulations=1000):
-    """Monte Carlo simulation"""
-    try:
-        if np.isnan(current_price) or np.isnan(volatility) or np.isnan(drift):
-            return np.array([current_price] * simulations)
-        
-        results = []
-        dt = 1.0/252.0
-        
-        for _ in range(simulations):
-            price = float(current_price)
-            for day in range(days):
-                random_shock = np.random.normal(0, 1)
-                price_change = price * (drift * dt + volatility * np.sqrt(dt) * random_shock)
-                price = max(price + price_change, 0.01)
-            results.append(price)
-        
-        return np.array(results)
-        
-    except Exception as e:
-        st.error(f"Monte Carlo error: {str(e)}")
-        return np.array([current_price] * simulations)
-
-# MAIN UI
-st.title('🚀 Market Predictor Pro')
-
+# Sidebar controls
 with st.sidebar:
-    st.markdown("### 🎯 Settings")
-    symbol = st.text_input("Stock Symbol:", "RELIANCE.NS")
-    period = st.selectbox("Data Period:", ["3mo", "6mo", "1y", "2y"], index=2)
+    st.subheader("🎯 Settings")
+    symbol = st.text_input("Stock Symbol", "RELIANCE.NS")
+    period = st.selectbox("Data Period", ["3mo", "6mo", "1y", "2y"], index=2)
     show_details = st.checkbox("Show Details", True)
 
+# Tabs
 tab1, tab2, tab3 = st.tabs(["🔮 Predictions", "📊 Technical Analysis", "🎲 Monte Carlo"])
 
+def _safe_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute indicators safely and align indices."""
+    out = df.copy()
+    if out.empty or "Close" not in out.columns:
+        return out
+
+    close = out["Close"].astype(float).values
+
+    # RSI
+    try:
+        out["RSI"] = pd.Series(calculate_rsi(close), index=out.index)
+    except Exception as e:
+        st.warning(f"RSI calc failed: {e}")
+
+    # MACD
+    try:
+        macd_line, sig_line = calculate_macd(close)
+        out["MACD"] = pd.Series(macd_line, index=out.index)
+        out["MACD_Signal"] = pd.Series(sig_line, index=out.index)
+    except Exception as e:
+        st.warning(f"MACD calc failed: {e}")
+
+    # Smoothed MAs
+    try:
+        out["SMA_20"] = pd.Series(calculate_smoothed_ma(close, 20), index=out.index)
+        out["SMA_50"] = pd.Series(calculate_smoothed_ma(close, 50), index=out.index)
+    except Exception as e:
+        st.warning(f"SMA calc failed: {e}")
+
+    return out
+
+def _simple_prediction(df: pd.DataFrame):
+    """Very simple heuristic: scores based on RSI/MACD/MAs."""
+    if df.empty or len(df) < 30:
+        return 0.0, 0.0, ["Insufficient data"]
+
+    latest = df.index[-1]
+    def g(col, default=0.0):
+        try:
+            return float(df.at[latest, col]) if col in df.columns and pd.notna(df.at[latest, col]) else default
+        except Exception:
+            return default
+
+    score = 0.0
+    signals = []
+
+    rsi = g("RSI", 50.0)
+    if rsi < 30: score += 15; signals.append("RSI Oversold")
+    elif rsi > 70: score -= 10; signals.append("RSI Overbought")
+    else: score += 5; signals.append("RSI Neutral")
+
+    macd = g("MACD", 0.0)
+    macd_sig = g("MACD_Signal", 0.0)
+    if macd > macd_sig: score += 15; signals.append("MACD Bullish")
+    else: score -= 5; signals.append("MACD Bearish")
+
+    close = g("Close", 0.0)
+    sma20 = g("SMA_20", 0.0)
+    sma50 = g("SMA_50", 0.0)
+    if close and sma20 and sma50:
+        if close > sma20 > sma50:
+            score += 20; signals.append("Strong Uptrend")
+        elif close > sma20:
+            score += 10; signals.append("Short-term Bullish")
+        else:
+            score -= 10; signals.append("Below MAs")
+
+    score = max(0.0, min(100.0, score))
+    confidence = score
+
+    returns = df["Close"].pct_change().dropna()
+    recent = float(returns.tail(5).mean()) if len(returns) >= 5 else 0.0
+    if score > 70: pred = recent * 1.5 + 0.01
+    elif score < 30: pred = recent * 0.5 - 0.01
+    else: pred = recent
+    pred = max(-0.1, min(0.1, pred))
+    return pred, confidence, signals
+
+# Tab 1: Predictions
 with tab1:
-    st.markdown("### 🔮 **AI Price Predictions**")
-    
-    if st.button("🚀 **GENERATE PREDICTIONS**", type="primary"):
-        with st.spinner(f'🧠 Analyzing {symbol}...'):
-            df = fetch_stock_data_with_fallback(symbol, period=period)
-            
-            if df.empty:
-                st.error("❌ Could not fetch data. Please check the symbol.")
+    st.markdown("### 🔮 AI Price Predictions")
+    if st.button("🚀 Generate Predictions", type="primary"):
+        with st.spinner(f"Fetching {symbol}..."):
+            try:
+                df = fetch_stock_data_with_fallback(symbol, period=period)
+            except Exception as e:
+                df = pd.DataFrame()
+                st.error(f"Data fetch failed: {e}")
+
+        if df.empty:
+            st.error("No data fetched. Check the symbol or period.")
+        else:
+            st.success(f"Loaded {len(df)} rows")
+            df_i = _safe_indicators(df).dropna()
+
+            if df_i.empty or len(df_i) < 30:
+                st.warning("Not enough data after indicators; try a longer period.")
             else:
-                st.success(f"✅ Loaded {len(df)} days of data")
-                
-                df_with_indicators = df.copy()
-                close_prices = df_with_indicators['Close'].values
-                
-                df_with_indicators['RSI'] = pd.Series(calculate_rsi(close_prices), index=df_with_indicators.index)
-                macd_line, signal_line = calculate_macd(close_prices)
-                df_with_indicators['MACD'] = pd.Series(macd_line, index=df_with_indicators.index)
-                df_with_indicators['MACD_Signal'] = pd.Series(signal_line, index=df_with_indicators.index)
-                df_with_indicators['SMA_20'] = pd.Series(calculate_smoothed_ma(close_prices, 20), index=df_with_indicators.index)
-                df_with_indicators['SMA_50'] = pd.Series(calculate_smoothed_ma(close_prices, 50), index=df_with_indicators.index)
-                
-                df_with_indicators.dropna(inplace=True)
-                
-                predicted_change, confidence, signals = simple_prediction_model(df_with_indicators)
-                
-                try:
-                    current_price = float(df_with_indicators['Close'].iloc[-1])
-                    predicted_price = current_price * (1 + predicted_change)
-                    current_rsi = float(df_with_indicators['RSI'].iloc[-1]) if 'RSI' in df_with_indicators.columns else 50
-                except IndexError:
-                    st.error("Not enough data to make a prediction after calculating indicators.")
-                    st.stop()
-                except Exception as e:
-                    st.error(f"Price calculation error: {str(e)}")
-                    st.stop()
+                pred_change, conf, sigs = _simple_prediction(df_i)
+                current = float(df_i["Close"].iloc[-1])
+                predicted = current * (1.0 + pred_change)
 
-                # ... (rest of the UI code for displaying cards, forecasts, etc.) ...
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("Current Price", f"{current:,.2f}")
+                with c2:
+                    st.metric("Predicted Change (≈)", f"{pred_change*100:.2f}%")
+                with c3:
+                    st.metric("Confidence", f"{conf:.0f}/100")
 
-# ... (The code for Tab 2 and Tab 3 would follow a similar refactoring pattern) ...
+                if show_details and sigs:
+                    st.write("Signals:")
+                    for s in sigs:
+                        st.write(f"- {s}")
 
-st.markdown("""
----
-<div style='text-align: center; padding: 2rem; background: linear-gradient(135deg, #161b2b, #1a1e2e); 
-            border-radius: 16px; margin-top: 2rem; border: 1px solid #2962ff;'>
-    <h3 style='color: #2962ff; margin-bottom: 1rem;'>🚀 Market Predictor Pro</h3>
-    <p style='margin-bottom: 1rem;'><strong>Features:</strong> AI Predictions • Technical Analysis • Monte Carlo Simulation • Risk Assessment</p>
-    <p style='font-size: 0.8rem; color: #8b949e;'>
-        ⚠️ <strong>Disclaimer:</strong> This tool provides predictions for educational purposes only. Always consult financial advisors before investing.
-    </p>
-</div>
-""", unsafe_allow_html=True)
+# Tab 2: Technical Analysis (minimal, safe)
+with tab2:
+    st.markdown("### 📊 Technical Analysis")
+    try:
+        df_ta = fetch_stock_data_with_fallback(symbol, period=period)
+        if not df_ta.empty:
+            df_ta = _safe_indicators(df_ta).dropna()
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+            fig.add_trace(go.Candlestick(
+                x=df_ta.index, open=df_ta["Open"], high=df_ta["High"],
+                low=df_ta["Low"], close=df_ta["Close"], name="Price"
+            ), row=1, col=1)
+            if "SMA_20" in df_ta: fig.add_trace(go.Scatter(x=df_ta.index, y=df_ta["SMA_20"], name="SMA 20"), row=1, col=1)
+            if "SMA_50" in df_ta: fig.add_trace(go.Scatter(x=df_ta.index, y=df_ta["SMA_50"], name="SMA 50"), row=1, col=1)
+            if "RSI" in df_ta: fig.add_trace(go.Scatter(x=df_ta.index, y=df_ta["RSI"], name="RSI"), row=2, col=1)
+            fig.update_layout(height=600, margin=dict(l=40, r=20, t=30, b=40))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Fetch some data in Predictions first or change period.")
+    except Exception as e:
+        st.error(f"TA error: {e}")
+
+# Tab 3: Monte Carlo (placeholder, safe)
+with tab3:
+    st.markdown("### 🎲 Monte Carlo")
+    st.info("Monte Carlo simulation coming next. Use Predictions and Technical Analysis tabs in the meantime.")
