@@ -1,211 +1,177 @@
 """
 pages/aggressive_screener.py
 
-🎯 Aggressive Full-Market Screener — TradingView-Style
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Data source   : Shoonya (Finvasia) API — 100 % live
-Universe      : ALL ~2 400 NSE equities (auto-loaded from scripmaster)
-Screening     : Progressive 3-phase filter → fast full-market scan
-Risk Mgmt     : ATR stop, swing S/R levels, manipulation guard
+🎯 Full-Market Aggressive Screener — TradingView Edition
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Exchanges  : NSE (EQ + SME + BE) + BSE (A, B, M, T, Z groups)
+Indices    : NIFTY 50 · BANK NIFTY · FINNIFTY · MIDCAP NIFTY · INDIA VIX · NIFTY NEXT 50
+Universe   : ~5 300+ stocks (all penny, micro, small, mid-cap)
+Live data  : Shoonya (Finvasia) API — 100 % live
 """
 
 from __future__ import annotations
 
-import io
-import os
-import time
-import zipfile
+import io, os, time, zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pyotp
 import requests as _requests
 import streamlit as st
 from dotenv import load_dotenv
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Page setup
-# ─────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Aggressive Screener", layout="wide", page_icon="🎯")
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE CONFIG
+# ═══════════════════════════════════════════════════════════════════════════
+st.set_page_config(page_title="🎯 Full Market Screener", layout="wide", page_icon="🎯")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TradingView Dark CSS
-# ─────────────────────────────────────────────────────────────────────────────
-TV_CSS = """
+# ═══════════════════════════════════════════════════════════════════════════
+# TRADINGVIEW CSS — pixel-perfect dark theme
+# ═══════════════════════════════════════════════════════════════════════════
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-/* ── global overrides ─────────────────────────────────────────────── */
-[data-testid="stAppViewContainer"] { background: #131722; }
-[data-testid="stSidebar"]         { background: #1e222d; border-right: 1px solid #2a2e39; }
-[data-testid="stHeader"]          { background: transparent; }
-header                             { background: transparent !important; }
-section[data-testid="stSidebar"] > div { padding-top: 1rem; }
-
-/* fonts */
-html, body, [class*="css"] {
-    font-family: 'Inter', 'Trebuchet MS', sans-serif;
-    color: #d1d4dc;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+:root {
+  --tv-bg:         #131722;
+  --tv-bg2:        #1e222d;
+  --tv-bg3:        #1c2030;
+  --tv-border:     #2a2e39;
+  --tv-text:       #d1d4dc;
+  --tv-text2:      #787b86;
+  --tv-blue:       #2962ff;
+  --tv-blue-glow:  rgba(41,98,255,.35);
+  --tv-green:      #26a69a;
+  --tv-red:        #ef5350;
+  --tv-orange:     #ff9800;
+  --tv-yellow:     #ffb74d;
+  --tv-green-bg:   rgba(38,166,154,.12);
+  --tv-red-bg:     rgba(239,83,80,.12);
 }
 
-/* headings */
-h1, h2, h3 { color: #d1d4dc !important; font-weight: 600 !important; letter-spacing: -0.5px; }
-h1 { font-size: 1.7rem !important; }
-h2 { font-size: 1.25rem !important; }
-h3 { font-size: 1.05rem !important; }
+/* ── Reset & Global ─────────────────────────────────────────── */
+[data-testid="stAppViewContainer"]       { background: var(--tv-bg) !important; }
+[data-testid="stSidebar"]               { background: var(--tv-bg2) !important; border-right: 1px solid var(--tv-border); }
+[data-testid="stHeader"], header         { background: transparent !important; }
+section[data-testid="stSidebar"] > div   { padding-top: .6rem; }
+html, body, [class*="css"]              { font-family: 'Inter', -apple-system, sans-serif !important; color: var(--tv-text); }
 
-/* ── metric cards ─────────────────────────────────────────────────── */
+h1, h2, h3 { color: var(--tv-text) !important; font-weight: 700 !important; letter-spacing: -.5px; }
+h1 { font-size: 1.55rem !important; }
+h2 { font-size: 1.15rem !important; }
+h3 { font-size: 1.0rem !important; }
+hr { border-color: var(--tv-border) !important; margin: 8px 0 !important; }
+
+/* ── Metric cards ─────────────────────────────────────────── */
 [data-testid="stMetric"] {
-    background: #1e222d;
-    border: 1px solid #2a2e39;
-    border-radius: 8px;
-    padding: 12px 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  background: var(--tv-bg2); border: 1px solid var(--tv-border); border-radius: 8px;
+  padding: 10px 14px; box-shadow: 0 2px 8px rgba(0,0,0,.25);
 }
-[data-testid="stMetricLabel"]  { color: #787b86 !important; font-size: .78rem !important; }
-[data-testid="stMetricValue"]  { color: #d1d4dc !important; font-size: 1.15rem !important; font-weight: 600 !important; }
-[data-testid="stMetricDelta"]  { font-size: .78rem !important; }
+[data-testid="stMetricLabel"]  { color: var(--tv-text2) !important; font-size: .72rem !important; text-transform: uppercase; letter-spacing: .5px; }
+[data-testid="stMetricValue"]  { color: var(--tv-text) !important; font-size: 1.05rem !important; font-weight: 700 !important; }
 
-/* ── dataframes ───────────────────────────────────────────────────── */
-[data-testid="stDataFrame"], .stDataFrame {
-    border-radius: 8px;
-    overflow: hidden;
-}
-[data-testid="stDataFrame"] table { background: #1e222d !important; }
-[data-testid="stDataFrame"] th   { background: #2a2e39 !important; color: #787b86 !important; font-weight: 600; font-size: .78rem; }
-[data-testid="stDataFrame"] td   { border-color: #2a2e39 !important; font-size: .82rem; }
+/* ── Dataframes ───────────────────────────────────────────── */
+[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
+[data-testid="stDataFrame"] th { background: #2a2e39 !important; color: var(--tv-text2) !important; font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .4px; }
+[data-testid="stDataFrame"] td { border-color: var(--tv-border) !important; font-size: .8rem; }
 
-/* ── buttons ──────────────────────────────────────────────────────── */
+/* ── Buttons ──────────────────────────────────────────────── */
 .stButton > button {
-    background: linear-gradient(135deg, #2962ff, #1e53e5) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    padding: 0.6rem 1rem !important;
-    transition: all 0.2s ease;
+  background: linear-gradient(135deg, #2962ff, #1e53e5) !important; color: #fff !important;
+  border: none !important; border-radius: 8px !important; font-weight: 600 !important;
+  padding: .55rem .9rem !important; transition: all .2s ease; letter-spacing: .3px;
 }
-.stButton > button:hover {
-    box-shadow: 0 0 20px rgba(41,98,255,.4) !important;
-    transform: translateY(-1px);
-}
+.stButton > button:hover { box-shadow: 0 0 24px var(--tv-blue-glow) !important; transform: translateY(-1px); }
 
-/* ── expanders ────────────────────────────────────────────────────── */
-[data-testid="stExpander"]       { background: #1e222d; border: 1px solid #2a2e39; border-radius: 8px; }
-[data-testid="stExpanderToggle"] { color: #787b86 !important; }
-
-/* ── info / success / error ───────────────────────────────────────── */
+/* ── Expanders ────────────────────────────────────────────── */
+[data-testid="stExpander"]       { background: var(--tv-bg2); border: 1px solid var(--tv-border); border-radius: 8px; }
+[data-testid="stExpanderToggle"] { color: var(--tv-text2) !important; }
 .stAlert { border-radius: 8px !important; }
+[data-testid="stProgress"] > div > div { background: var(--tv-blue) !important; }
 
-/* ── progress bar ─────────────────────────────────────────────────── */
-[data-testid="stProgress"] > div > div { background: #2962ff !important; }
+/* ── Tabs ─────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] { gap: 0; border-bottom: 1px solid var(--tv-border); }
+.stTabs [data-baseweb="tab"]      {
+  background: transparent; color: var(--tv-text2); border: none;
+  padding: 8px 18px; font-weight: 500; font-size: .85rem; border-bottom: 2px solid transparent;
+}
+.stTabs [aria-selected="true"] { color: var(--tv-blue) !important; border-bottom: 2px solid var(--tv-blue) !important; }
+.stTabs [data-baseweb="tab-panel"] { padding-top: 12px; }
 
-/* ── dividers ─────────────────────────────────────────────────────── */
-hr { border-color: #2a2e39 !important; }
-
-/* ── stock card ───────────────────────────────────────────────────── */
-.tv-stock-card {
-    background: #1e222d;
-    border: 1px solid #2a2e39;
-    border-radius: 10px;
-    padding: 18px 22px;
-    margin: 8px 0;
-    box-shadow: 0 4px 16px rgba(0,0,0,.25);
-    transition: border-color .2s, box-shadow .2s;
-}
-.tv-stock-card:hover {
-    border-color: #2962ff;
-    box-shadow: 0 4px 24px rgba(41,98,255,.15);
-}
-.tv-header {
-    display: flex; align-items: center; gap: 12px;
-    margin-bottom: 10px;
-}
-.tv-ticker {
-    font-size: 1.15rem; font-weight: 700; color: #d1d4dc;
-    letter-spacing: -.3px;
-}
-.tv-badge {
-    display: inline-block; padding: 2px 10px; border-radius: 4px;
-    font-size: .72rem; font-weight: 600; letter-spacing: .5px;
-}
-.tv-buy   { background: rgba(38,166,154,.15); color: #26a69a; border: 1px solid #26a69a; }
-.tv-sell  { background: rgba(239,83,80,.15);  color: #ef5350; border: 1px solid #ef5350; }
-.tv-watch { background: rgba(255,183,77,.15); color: #ffb74d; border: 1px solid #ffb74d; }
-.tv-clean { background: rgba(38,166,154,.08); color: #26a69a; }
-.tv-warn  { background: rgba(239,83,80,.08);  color: #ef5350; }
-
-.tv-price {
-    font-size: 1.5rem; font-weight: 700; color: #d1d4dc;
-}
-.tv-change-up   { color: #26a69a; font-weight: 600; }
-.tv-change-down { color: #ef5350; font-weight: 600; }
-.tv-label  { color: #787b86; font-size: .75rem; font-weight: 500; }
-.tv-value  { color: #d1d4dc; font-size: .88rem; font-weight: 600; }
-
-/* risk grid */
-.tv-risk-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px; margin-top: 10px;
-}
-.tv-risk-item {
-    background: #131722;
-    border-radius: 6px;
-    padding: 8px 12px;
-    text-align: center;
-}
-
-/* pulse animation for live indicator */
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-.tv-live { animation: pulse 2s infinite; color: #26a69a; font-weight: 700; }
-
-/* heatmap cells */
-.tv-heat-strong { background: rgba(38,166,154,.25); }
-.tv-heat-weak   { background: rgba(239,83,80,.12); }
-
-/* scrollbar */
-::-webkit-scrollbar       { width: 6px; }
-::-webkit-scrollbar-track { background: #131722; }
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--tv-bg); }
 ::-webkit-scrollbar-thumb { background: #434651; border-radius: 3px; }
-</style>
-"""
-st.markdown(TV_CSS, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Shoonya API — login once per session
-# ─────────────────────────────────────────────────────────────────────────────
+/* ── Ticker tape ──────────────────────────────────────────── */
+.tv-tape { display: flex; gap: 24px; overflow-x: auto; padding: 10px 0; }
+.tv-tape-item {
+  flex-shrink: 0; background: var(--tv-bg2); border: 1px solid var(--tv-border);
+  border-radius: 8px; padding: 10px 18px; min-width: 160px; text-align: center;
+  transition: border-color .2s;
+}
+.tv-tape-item:hover { border-color: var(--tv-blue); }
+.tv-tape-name  { font-size: .7rem; color: var(--tv-text2); font-weight: 500; text-transform: uppercase; letter-spacing: .5px; }
+.tv-tape-price { font-size: 1.15rem; font-weight: 700; color: var(--tv-text); margin: 2px 0; }
+.tv-tape-chg   { font-size: .78rem; font-weight: 600; }
+.tv-up   { color: var(--tv-green); }
+.tv-down { color: var(--tv-red); }
+.tv-flat { color: var(--tv-text2); }
+
+/* ── Stock cards ──────────────────────────────────────────── */
+.tv-card {
+  background: var(--tv-bg2); border: 1px solid var(--tv-border); border-radius: 10px;
+  padding: 16px 20px; margin: 6px 0; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+  transition: border-color .2s, box-shadow .2s;
+}
+.tv-card:hover { border-color: var(--tv-blue); box-shadow: 0 4px 24px var(--tv-blue-glow); }
+.tv-row  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tv-sym  { font-size: 1.1rem; font-weight: 700; color: var(--tv-text); letter-spacing: -.3px; }
+.tv-exch { font-size: .65rem; color: var(--tv-text2); background: var(--tv-bg); border-radius: 3px; padding: 1px 6px; font-weight: 600; }
+.tv-badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: .68rem; font-weight: 600; letter-spacing: .4px; }
+.tv-buy    { background: var(--tv-green-bg); color: var(--tv-green); border: 1px solid var(--tv-green); }
+.tv-watch  { background: rgba(255,183,77,.12); color: var(--tv-yellow); border: 1px solid var(--tv-yellow); }
+.tv-clean  { background: var(--tv-green-bg); color: var(--tv-green); }
+.tv-dirty  { background: var(--tv-red-bg); color: var(--tv-red); }
+.tv-price  { font-size: 1.4rem; font-weight: 700; color: var(--tv-text); }
+.tv-lbl    { color: var(--tv-text2); font-size: .7rem; font-weight: 500; text-transform: uppercase; letter-spacing: .3px; }
+.tv-val    { color: var(--tv-text); font-size: .85rem; font-weight: 600; }
+.tv-grid   { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; margin-top: 10px; }
+.tv-cell   { background: var(--tv-bg); border-radius: 6px; padding: 7px 10px; text-align: center; }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+.tv-live { animation: pulse 2s infinite; color: var(--tv-green); font-weight: 700; font-size: .8rem; }
+</style>
+""", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SHOONYA LOGIN (cached per session)
+# ═══════════════════════════════════════════════════════════════════════════
 @st.cache_resource(show_spinner=False)
-def get_shoonya_api():
+def _login():
     try:
         from NorenRestApiPy.NorenApi import NorenApi
     except ImportError:
         return None, "NorenRestApiPy not installed"
-
     env_path = Path(__file__).resolve().parent.parent / "shoonya.env"
     load_dotenv(dotenv_path=env_path, override=True)
-
-    uid  = os.getenv("SHOONYA_USER_ID", "")
-    pwd  = os.getenv("SHOONYA_PASSWORD", "")
-    totp = os.getenv("SHOONYA_TOTP_SECRET", "").replace("-", "").replace(" ", "").strip()
-    vc   = os.getenv("SHOONYA_VENDOR_CODE", "")
+    uid   = os.getenv("SHOONYA_USER_ID", "")
+    pwd   = os.getenv("SHOONYA_PASSWORD", "")
+    totp  = os.getenv("SHOONYA_TOTP_SECRET", "").replace("-", "").replace(" ", "").strip()
+    vc    = os.getenv("SHOONYA_VENDOR_CODE", "")
     api_s = os.getenv("SHOONYA_API_SECRET", "")
-    imei = os.getenv("SHOONYA_IMEI", "")
-
+    imei  = os.getenv("SHOONYA_IMEI", "")
     twoFA = totp if totp.isdigit() else pyotp.TOTP(totp.upper()).now()
 
-    class _Api(NorenApi):
+    class _A(NorenApi):
         def __init__(self):
-            super().__init__(
-                host="https://api.shoonya.com/NorenWClientTP/",
-                websocket="wss://api.shoonya.com/NorenWSTP/",
-            )
-    api = _Api()
+            super().__init__(host="https://api.shoonya.com/NorenWClientTP/",
+                             websocket="wss://api.shoonya.com/NorenWSTP/")
+    api = _A()
     ret = api.login(userid=uid, password=pwd, twoFA=twoFA,
                     vendor_code=vc, api_secret=api_s, imei=imei)
     if ret and ret.get("stat") == "Ok":
@@ -213,73 +179,94 @@ def get_shoonya_api():
     return None, ret.get("emsg") if ret else "No response"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Scripmaster — download ALL NSE equity tokens (cached daily)
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# SCRIPMASTER LOADER — NSE + BSE (cached daily)
+# ═══════════════════════════════════════════════════════════════════════════
+INDICES = [
+    ("NIFTY 50",      "NSE", "26000"),
+    ("BANK NIFTY",    "NSE", "26009"),
+    ("FINNIFTY",      "NSE", "26037"),
+    ("MIDCAP NIFTY",  "NSE", "26074"),
+    ("NIFTY NEXT 50", "NSE", "26013"),
+    ("INDIA VIX",     "NSE", "26017"),
+]
+
 @st.cache_data(ttl=86400, show_spinner=False)
-def load_nse_scripmaster() -> pd.DataFrame:
-    """Download Shoonya's NSE scripmaster and return EQ-only rows."""
-    urls = [
-        "https://api.shoonya.com/NSE_symbols.txt.zip",
-        "https://shoonya.finvasia.com/NSE_symbols.txt.zip",
+def _load_scripmaster():
+    """Download NSE + BSE scripmaster ZIPs, return combined EQ DataFrame."""
+    all_rows = []
+    configs = [
+        ("NSE", "https://api.shoonya.com/NSE_symbols.txt.zip",
+         {"EQ", "SM", "ST", "BE"}),          # equity, SME, startup, trade-to-trade
+        ("BSE", "https://api.shoonya.com/BSE_symbols.txt.zip",
+         {"A", "B", "M", "T", "Z"}),         # all BSE groups
     ]
-    for url in urls:
+    for exch, url, valid_inst in configs:
         try:
-            r = _requests.get(url, timeout=20)
-            if r.status_code != 200 or len(r.content) < 5000:
+            r = _requests.get(url, timeout=25)
+            if r.status_code != 200 or len(r.content) < 2000:
                 continue
             z = zipfile.ZipFile(io.BytesIO(r.content))
-            txt = z.read(z.namelist()[0]).decode("utf-8", errors="replace")
+            txt = z.read(z.namelist()[0]).decode("utf-8", "replace")
             lines = txt.strip().split("\n")
-            header = [h.strip() for h in lines[0].split(",")]
-            rows = []
-            for line in lines[1:]:
-                parts = line.split(",")
-                if len(parts) >= len(header):
-                    rows.append(dict(zip(header, [p.strip() for p in parts])))
-            df = pd.DataFrame(rows)
-            # Filter to equity only
-            eq = df[df["Instrument"] == "EQ"].copy()
-            eq["Token"] = eq["Token"].astype(str)
-            # Clean trading symbol (remove -EQ suffix for display)
-            eq["CleanSymbol"] = eq["TradingSymbol"].str.replace("-EQ", "", regex=False)
-            return eq.reset_index(drop=True)
+            hdr = [h.strip() for h in lines[0].split(",")]
+            for ln in lines[1:]:
+                parts = ln.split(",")
+                if len(parts) < len(hdr):
+                    continue
+                row = dict(zip(hdr, [p.strip() for p in parts]))
+                inst = row.get("Instrument", "")
+                if inst in valid_inst:
+                    row["Exchange"] = exch
+                    # Normalise symbol
+                    sym = row.get("Symbol", row.get("TradingSymbol", ""))
+                    tsym = row.get("TradingSymbol", sym)
+                    row["CleanSymbol"] = (
+                        sym.replace("-EQ", "").replace("-BE", "")
+                           .replace("-SM", "").replace("-ST", "").strip()
+                    )
+                    row["TradSym"] = tsym
+                    all_rows.append(row)
         except Exception:
             continue
-    return pd.DataFrame()
+    if not all_rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(all_rows)
+    df["Token"] = df["Token"].astype(str)
+    return df.reset_index(drop=True)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data helpers
-# ─────────────────────────────────────────────────────────────────────────────
-def _quote(api, token: str, exch: str = "NSE") -> dict:
+# ═══════════════════════════════════════════════════════════════════════════
+# DATA HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
+def _q(api, exch, token):
     try:
-        q = api.get_quotes(exchange=exch, token=token)
-        if q and q.get("stat") == "Ok":
+        r = api.get_quotes(exchange=exch, token=str(token))
+        if r and r.get("stat") == "Ok":
             return {
-                "ltp":   float(q.get("lp",  0) or 0),
-                "vol":   int(q.get("v",   0) or 0),
-                "h52":   float(q.get("h52", 0) or 0),
-                "l52":   float(q.get("l52", 0) or 0),
-                "open":  float(q.get("o",   0) or 0),
-                "high":  float(q.get("h",   0) or 0),
-                "low":   float(q.get("l",   0) or 0),
-                "pc":    float(q.get("pc",  0) or 0),
-                "pdcl":  float(q.get("pdcl", 0) or 0),
+                "ltp":  float(r.get("lp",0) or 0),
+                "vol":  int(r.get("v",0) or 0),
+                "h52":  float(r.get("h52",0) or 0),
+                "l52":  float(r.get("l52",0) or 0),
+                "open": float(r.get("o",0) or 0),
+                "high": float(r.get("h",0) or 0),
+                "low":  float(r.get("l",0) or 0),
+                "pc":   float(r.get("pc",0) or 0),
+                "pdcl": float(r.get("pdcl",0) or 0),
             }
     except Exception:
         pass
     return {}
 
 
-def _ohlcv(api, token: str, exch: str = "NSE", days: int = 290) -> pd.DataFrame:
-    end_dt   = datetime.now()
-    start_dt = end_dt - timedelta(days=int(days * 1.5))
+def _ohlcv(api, exch, token, days=290):
+    end = datetime.now()
+    start = end - timedelta(days=int(days * 1.5))
     try:
         raw = api.get_time_price_series(
-            exchange=exch, token=token,
-            starttime=start_dt.strftime("%d-%m-%Y %H:%M:%S"),
-            endtime=end_dt.strftime("%d-%m-%Y %H:%M:%S"),
+            exchange=exch, token=str(token),
+            starttime=start.strftime("%d-%m-%Y %H:%M:%S"),
+            endtime=end.strftime("%d-%m-%Y %H:%M:%S"),
             interval=1440,
         )
         if not isinstance(raw, list) or not raw:
@@ -304,708 +291,574 @@ def _ohlcv(api, token: str, exch: str = "NSE", days: int = 290) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Indicators
-# ─────────────────────────────────────────────────────────────────────────────
-def _rsi(close: pd.Series, n: int = 14) -> float:
-    d = close.diff()
-    g = d.clip(lower=0).ewm(com=n - 1, min_periods=n).mean()
-    l = (-d).clip(lower=0).ewm(com=n - 1, min_periods=n).mean()
-    rs = g / l.replace(0, 1e-10)
-    s = 100 - 100 / (1 + rs)
-    return float(s.iloc[-1]) if len(s) >= n else 0.0
+# ═══════════════════════════════════════════════════════════════════════════
+# INDICATORS
+# ═══════════════════════════════════════════════════════════════════════════
+def _rsi(c, n=14):
+    d = c.diff()
+    g = d.clip(lower=0).ewm(com=n-1, min_periods=n).mean()
+    l = (-d).clip(lower=0).ewm(com=n-1, min_periods=n).mean()
+    return float((100 - 100/(1+g/l.replace(0,1e-10))).iloc[-1]) if len(c) >= n else 0
 
+def _atr(df, n=14):
+    tr = pd.concat([df["high"]-df["low"],
+                     (df["high"]-df["close"].shift(1)).abs(),
+                     (df["low"]-df["close"].shift(1)).abs()], axis=1).max(axis=1)
+    return float(tr.ewm(com=n-1, min_periods=n).mean().iloc[-1])
 
-def _atr(df: pd.DataFrame, n: int = 14) -> float:
-    hl = df["high"] - df["low"]
-    hc = (df["high"] - df["close"].shift(1)).abs()
-    lc = (df["low"]  - df["close"].shift(1)).abs()
-    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    return float(tr.ewm(com=n - 1, min_periods=n).mean().iloc[-1])
-
-
-def _ema(s: pd.Series, n: int) -> float:
+def _ema(s, n):
     return float(s.ewm(span=n, min_periods=1).mean().iloc[-1])
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Criteria checks
-# ─────────────────────────────────────────────────────────────────────────────
-def _consol_breakout(df: pd.DataFrame) -> bool:
-    if len(df) < 25:
-        return False
-    consol = df.tail(21).iloc[:-1]
-    mx, mn = float(consol["close"].max()), float(consol["close"].min())
-    if mn <= 0:
-        return False
-    return ((mx - mn) / mn < 0.08) and float(df["close"].iloc[-1]) > mx
+# ═══════════════════════════════════════════════════════════════════════════
+# CRITERIA CHECKS
+# ═══════════════════════════════════════════════════════════════════════════
+def _consol_breakout(df):
+    if len(df) < 25: return False
+    c = df.tail(21).iloc[:-1]
+    mx, mn = float(c["close"].max()), float(c["close"].min())
+    return mn > 0 and (mx-mn)/mn < 0.08 and float(df["close"].iloc[-1]) > mx
 
-
-def _circuit_hit(df: pd.DataFrame, n: int = 5) -> bool:
-    if len(df) < n + 2:
-        return False
-    r = df.tail(n + 1).copy()
+def _circuit_hit(df, n=5):
+    if len(df) < n+2: return False
+    r = df.tail(n+1)
     pct = r["close"].pct_change().abs()
-    hl  = (r["high"] - r["low"]) / r["close"].replace(0, 1e-10)
-    return bool((pct.tail(n) >= 0.19).any() | (hl.tail(n) < 0.001).any())
+    hl  = (r["high"]-r["low"])/r["close"].replace(0,1e-10)
+    return bool((pct.tail(n)>=.19).any() | (hl.tail(n)<.001).any())
+
+def _manip(df, ltp):
+    if len(df) < 20: return []
+    fl = []; c = df["close"].astype(float); v = df["volume"].astype(float)
+    tr = float(c.tail(20).min())
+    if tr > 0 and (ltp-tr)/tr > .50: fl.append(f"PUMP +{round((ltp-tr)/tr*100)}%")
+    pct = c.pct_change().tail(12).values
+    for i in range(len(pct)-1):
+        if pct[i] > .15 and pct[i+1] < -.05: fl.append("Spike+Dump"); break
+    zd = int((v.tail(20)==0).sum())
+    if zd > 2: fl.append(f"{zd} zero-vol")
+    mu = float(v.tail(20).mean()); sd = float(v.tail(20).std())
+    if mu > 0 and sd/mu > 3: fl.append("Erratic vol")
+    hl = ((df["high"]-df["low"])/df["close"].replace(0,1e-10)).tail(10)
+    if int((hl<.005).sum()) > 2: fl.append("Frozen")
+    return fl
+
+def _sr(df, ltp):
+    c = df["close"].astype(float)
+    e20, e50 = _ema(c,20), _ema(c,50)
+    rl = float(df["low"].tail(20).min())
+    rh = float(df["high"].tail(60).max())
+    h52 = float(c.tail(252).max())
+    sc = [s for s in [rl,e20,e50] if 0<s<ltp]
+    sup = max(sc) if sc else round(ltp*.95,2)
+    rc = [r for r in [h52,rh] if r>ltp]
+    res = min(rc) if rc else round(ltp*1.20,2)
+    return round(sup,2), round(res,2), round(e20,2), round(e50,2)
 
 
-def _manip_flags(df: pd.DataFrame, ltp: float) -> list[str]:
-    if len(df) < 20:
-        return []
-    flags = []
-    close  = df["close"].astype(float)
-    volume = df["volume"].astype(float)
-    # Pump >50% from 20d low
-    trough = float(close.tail(20).min())
-    if trough > 0 and (ltp - trough) / trough > 0.50:
-        flags.append(f"PUMP +{round((ltp-trough)/trough*100)}%")
-    # Spike-and-dump
-    pct = close.pct_change().tail(12).values
-    for i in range(len(pct) - 1):
-        if pct[i] > 0.15 and pct[i + 1] < -0.05:
-            flags.append("Spike+Dump")
-            break
-    # Zero-vol days
-    zd = int((volume.tail(20) == 0).sum())
-    if zd > 2:
-        flags.append(f"{zd} zero-vol days")
-    # Erratic volume
-    mu = float(volume.tail(20).mean())
-    sd = float(volume.tail(20).std())
-    if mu > 0 and sd / mu > 3.0:
-        flags.append("Erratic vol")
-    # Frozen candles
-    hl_pct = ((df["high"] - df["low"]) / df["close"].replace(0, 1e-10)).tail(10)
-    if int((hl_pct < 0.005).sum()) > 2:
-        flags.append("Frozen candles")
-    return flags
-
-
-def _support_resistance(df: pd.DataFrame, ltp: float):
-    close = df["close"].astype(float)
-    ema20 = _ema(close, 20)
-    ema50 = _ema(close, 50)
-    recent_low  = float(df["low"].tail(20).min())
-    recent_high = float(df["high"].tail(60).max())
-    h52 = float(close.tail(252).max())
-
-    sup_cands = [s for s in [recent_low, ema20, ema50] if 0 < s < ltp]
-    support = max(sup_cands) if sup_cands else round(ltp * 0.95, 2)
-
-    res_cands = [r for r in [h52, recent_high] if r > ltp]
-    resistance = min(res_cands) if res_cands else round(ltp * 1.20, 2)
-
-    return round(support, 2), round(resistance, 2), round(ema20, 2), round(ema50, 2)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3-Phase progressive screener
-# ─────────────────────────────────────────────────────────────────────────────
-def phase1_price_filter(api, tokens_df: pd.DataFrame, price_min: float,
-                        price_max: float, progress_cb=None) -> list[dict]:
-    """Phase 1: Fetch live quotes for ALL stocks, keep those in price range."""
-    results = []
-    total = len(tokens_df)
-
-    def fetch_one(row):
-        q = _quote(api, row["Token"])
-        if q and price_min <= q["ltp"] <= price_max:
+# ═══════════════════════════════════════════════════════════════════════════
+# PROGRESSIVE SCAN ENGINE
+# ═══════════════════════════════════════════════════════════════════════════
+def phase1(api, df, pmin, pmax, cb=None):
+    results = []; total = len(df)
+    def _one(row):
+        q = _q(api, row["Exchange"], row["Token"])
+        if q and pmin <= q["ltp"] <= pmax:
             return {**row.to_dict(), **q}
         return None
-
-    # Use threads for speed (10 workers ~ 3x faster)
-    with ThreadPoolExecutor(max_workers=10) as pool:
-        futures = {pool.submit(fetch_one, row): idx
-                   for idx, row in tokens_df.iterrows()}
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        futs = {pool.submit(_one, r): i for i, r in df.iterrows()}
         done = 0
-        for fut in as_completed(futures):
+        for f in as_completed(futs):
             done += 1
-            if progress_cb and done % 25 == 0:
-                progress_cb(done / total,
-                            f"Phase 1: Price scan {done}/{total}")
-            res = fut.result()
-            if res:
-                results.append(res)
-
-    if progress_cb:
-        progress_cb(1.0, f"Phase 1 done — {len(results)} in price range")
+            if cb and done % 50 == 0:
+                cb(done/total, f"Phase 1 · price scan {done:,}/{total:,}")
+            r = f.result()
+            if r: results.append(r)
+    if cb: cb(1.0, f"Phase 1 done — {len(results):,} in price range")
     return results
 
+def phase2(results, min_vol):
+    return [r for r in results if r.get("vol",0) >= min_vol // 5]
 
-def phase2_volume_filter(results: list[dict], min_avg_vol: int) -> list[dict]:
-    """Phase 2: Quick volume check from live quote data."""
-    # We only have today's volume from quote; avg_vol needs history.
-    # For now, keep stocks with today's volume > min_avg_vol / 5
-    # (conservative pre-filter; phase 3 will verify properly).
-    out = []
-    for r in results:
-        if r.get("vol", 0) >= min_avg_vol // 5:
-            out.append(r)
+def phase3(api, cands, cb=None):
+    out = []; total = len(cands)
+    for i, cd in enumerate(cands):
+        if cb and i % 3 == 0:
+            cb(i/max(total,1), f"Phase 3 · deep {i}/{total} — {cd.get('CleanSymbol','')}")
+        exch, tok, sym, ltp = cd["Exchange"], cd["Token"], cd.get("CleanSymbol",""), cd.get("ltp",0)
+        df = _ohlcv(api, exch, tok, 290)
+        if df.empty or len(df) < 50: continue
+        # inject live
+        td = pd.Timestamp.now().normalize()
+        ld = df.iloc[-1]["date"]
+        if hasattr(ld,"normalize") and ld.normalize()==td:
+            df.loc[df.index[-1],"close"] = ltp
+            if cd.get("vol",0)>0: df.loc[df.index[-1],"volume"] = cd["vol"]
+        c = df["close"].astype(float); v = df["volume"].astype(float)
+        av20 = float(v.tail(20).mean()); rsi = _rsi(c); e20 = _ema(c,20); e50 = _ema(c,50)
+        atr = _atr(df); h52 = float(c.tail(252).max()); tv = cd.get("vol", int(v.iloc[-1]))
+        vs = tv/max(av20,1); n52 = h52>0 and ltp>=.98*h52; bo = _consol_breakout(df)
+        cir = _circuit_hit(df); mf = _manip(df, ltp)
+        crit = {"Price": 20<=ltp<=150, "AvgVol>1M": av20>=1e6, "VolSurge3x": vs>=3,
+                "RSI60-80": 60<rsi<80, "52W/BO": n52 or bo, "NoCircuit": not cir}
+        cm = sum(crit.values()); clean = len(mf)==0; fp = cm==6 and clean
+        sup,res_l,_,_ = _sr(df,ltp)
+        sl = min(max(min(ltp*.95, ltp-1.5*atr), sup), ltp*.95)
+        tgt = res_l if ltp<res_l<=ltp*1.32 else ltp*1.20
+        risk = ltp-sl; rew = tgt-ltp; rr = round(rew/max(risk,.01),2)
+        trend = "UP" if ltp>e50 and e20>e50 else ("SIDE" if ltp>e50 else "DOWN")
+        pdcl = cd.get("pdcl", ltp); pchg = round((ltp-pdcl)/max(pdcl,.01)*100, 1)
+        out.append({
+            "symbol": sym, "token": tok, "exchange": exch,
+            "ltp": round(ltp,2), "pct_chg": pchg, "rsi": round(rsi,1),
+            "ema20": round(e20,2), "ema50": round(e50,2), "atr": round(atr,2),
+            "avg_vol20": int(av20), "today_vol": tv, "vol_surge": round(vs,1),
+            "h52": round(h52,2), "near_52w": n52, "breakout": bo, "circuit": cir,
+            "support": sup, "resistance": res_l, "stop_loss": round(sl,2),
+            "target": round(tgt,2), "risk": round(risk,2), "reward": round(rew,2),
+            "rr": rr, "trend": trend, "criteria": crit, "crit_met": cm,
+            "full_pass": fp, "is_clean": clean, "m_flags": mf, "df": df,
+        })
+        time.sleep(0.2)
+    if cb: cb(1.0, f"Phase 3 done — {len(out)} analysed")
     return out
 
 
-def phase3_deep_analysis(api, candidates: list[dict], progress_cb=None) -> list[dict]:
-    """Phase 3: Fetch OHLCV + compute all indicators + criteria."""
-    results = []
-    total = len(candidates)
-
-    for idx, cand in enumerate(candidates):
-        if progress_cb and idx % 3 == 0:
-            progress_cb(idx / max(total, 1),
-                        f"Phase 3: Deep analysis {idx}/{total} — {cand.get('CleanSymbol','')}")
-
-        token = cand["Token"]
-        sym   = cand.get("CleanSymbol", cand.get("Symbol", ""))
-        ltp   = cand.get("ltp", 0.0)
-
-        df = _ohlcv(api, token, days=290)
-        if df.empty or len(df) < 60:
-            continue
-
-        # Inject live data
-        today = pd.Timestamp.now().normalize()
-        last_d = df.iloc[-1]["date"]
-        if hasattr(last_d, "normalize") and last_d.normalize() == today:
-            df.loc[df.index[-1], "close"] = ltp
-            if cand.get("vol", 0) > 0:
-                df.loc[df.index[-1], "volume"] = cand["vol"]
-
-        close  = df["close"].astype(float)
-        volume = df["volume"].astype(float)
-
-        # Indicators
-        avg_vol20 = float(volume.tail(20).mean())
-        rsi       = _rsi(close, 14)
-        ema20     = _ema(close, 20)
-        ema50     = _ema(close, 50)
-        atr       = _atr(df, 14)
-        h52       = float(close.tail(252).max())
-        today_vol = cand.get("vol", int(volume.iloc[-1]))
-
-        vol_surge = today_vol / max(avg_vol20, 1)
-        near_52w  = h52 > 0 and ltp >= 0.98 * h52
-        breakout  = _consol_breakout(df)
-        circuit   = _circuit_hit(df)
-        m_flags   = _manip_flags(df, ltp)
-
-        criteria = {
-            "Price range":        20.0 <= ltp <= 150.0,
-            "Avg Vol > 1M":       avg_vol20 >= 1_000_000,
-            "Vol Surge 3x":       vol_surge >= 3.0,
-            "RSI 60-80":          60 < rsi < 80,
-            "52W High/Breakout":  near_52w or breakout,
-            "No Circuit":         not circuit,
-        }
-        crit_met = sum(criteria.values())
-        is_clean = len(m_flags) == 0
-        full_pass = crit_met == 6 and is_clean
-
-        # Risk
-        sup, res_level, _, _ = _support_resistance(df, ltp)
-        hard_stop = ltp * 0.95
-        atr_stop  = ltp - 1.5 * atr
-        sl = max(min(hard_stop, atr_stop), sup)
-        sl = min(sl, ltp * 0.95)
-        tgt = res_level if ltp < res_level <= ltp * 1.32 else ltp * 1.20
-        risk   = ltp - sl
-        reward = tgt - ltp
-        rr = round(reward / max(risk, 0.01), 2)
-
-        trend = ("UP" if (ltp > ema50 and ema20 > ema50) else
-                 "SIDE" if ltp > ema50 else "DOWN")
-
-        pct_chg = ((ltp - cand.get("pdcl", ltp)) / max(cand.get("pdcl", ltp), 0.01)) * 100
-
-        results.append({
-            "symbol":      sym,
-            "token":       token,
-            "ltp":         round(ltp, 2),
-            "pct_chg":     round(pct_chg, 1),
-            "rsi":         round(rsi, 1),
-            "ema20":       round(ema20, 2),
-            "ema50":       round(ema50, 2),
-            "atr":         round(atr, 2),
-            "avg_vol20":   int(avg_vol20),
-            "today_vol":   today_vol,
-            "vol_surge":   round(vol_surge, 1),
-            "h52":         round(h52, 2),
-            "near_52w":    near_52w,
-            "breakout":    breakout,
-            "circuit":     circuit,
-            "support":     sup,
-            "resistance":  res_level,
-            "stop_loss":   round(sl, 2),
-            "target":      round(tgt, 2),
-            "risk":        round(risk, 2),
-            "reward":      round(reward, 2),
-            "rr":          rr,
-            "trend":       trend,
-            "criteria":    criteria,
-            "crit_met":    crit_met,
-            "full_pass":   full_pass,
-            "is_clean":    is_clean,
-            "m_flags":     m_flags,
-            "df":          df,
-        })
-        time.sleep(0.25)
-
-    if progress_cb:
-        progress_cb(1.0, f"Phase 3 done — {len(results)} analysed")
-    return results
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Chart builder (TradingView-style)
-# ─────────────────────────────────────────────────────────────────────────────
-def _tv_chart(res: dict) -> go.Figure:
-    df_c  = res["df"].tail(60).copy()
-    close = df_c["close"].astype(float)
-    vol   = df_c["volume"].astype(float)
-    ema20 = close.ewm(span=20, min_periods=1).mean()
-    ema50 = close.ewm(span=50, min_periods=1).mean()
-
-    fig = go.Figure()
-
-    # Volume bars (background)
-    colors_v = ["rgba(38,166,154,.25)" if close.iloc[i] >= close.iloc[max(i-1,0)]
-                else "rgba(239,83,80,.25)" for i in range(len(close))]
-    fig.add_trace(go.Bar(
-        x=df_c["date"], y=vol, name="Volume", yaxis="y2",
-        marker_color=colors_v, showlegend=False,
-    ))
-
-    # Candlesticks
+# ═══════════════════════════════════════════════════════════════════════════
+# CHART BUILDERS
+# ═══════════════════════════════════════════════════════════════════════════
+def _tv_chart(res, height=340):
+    d = res["df"].tail(60).copy()
+    c = d["close"].astype(float); v = d["volume"].astype(float)
+    e20 = c.ewm(span=20, min_periods=1).mean()
+    e50 = c.ewm(span=50, min_periods=1).mean()
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[.78,.22],
+                        vertical_spacing=0.02)
+    # Volume
+    vc = [f"rgba(38,166,154,.3)" if c.iloc[i]>=c.iloc[max(i-1,0)]
+          else f"rgba(239,83,80,.3)" for i in range(len(c))]
+    fig.add_trace(go.Bar(x=d["date"], y=v, marker_color=vc, showlegend=False), row=2, col=1)
+    # Candles
     fig.add_trace(go.Candlestick(
-        x=df_c["date"],
-        open=df_c["open"], high=df_c["high"],
-        low=df_c["low"],   close=close,
+        x=d["date"], open=d["open"], high=d["high"], low=d["low"], close=c,
         increasing_line_color="#26a69a", increasing_fillcolor="#26a69a",
         decreasing_line_color="#ef5350", decreasing_fillcolor="#ef5350",
-        name="Price", showlegend=False,
-    ))
-
+        showlegend=False), row=1, col=1)
     # EMAs
-    fig.add_trace(go.Scatter(
-        x=df_c["date"], y=ema20, name="EMA 20",
-        line=dict(color="#ff9800", width=1.3, dash="dot"),
-    ))
-    fig.add_trace(go.Scatter(
-        x=df_c["date"], y=ema50, name="EMA 50",
-        line=dict(color="#2962ff", width=1.3),
-    ))
-
-    # S/R lines
+    fig.add_trace(go.Scatter(x=d["date"], y=e20, name="EMA 20",
+                             line=dict(color="#ff9800", width=1.2, dash="dot")), row=1, col=1)
+    fig.add_trace(go.Scatter(x=d["date"], y=e50, name="EMA 50",
+                             line=dict(color="#2962ff", width=1.2)), row=1, col=1)
+    # SL / TGT
     fig.add_hline(y=res["stop_loss"], line=dict(color="#ef5350", dash="dash", width=1),
-                  annotation_text=f"SL {res['stop_loss']}", annotation_font_color="#ef5350",
-                  annotation_font_size=10)
+                  annotation_text=f"SL ₹{res['stop_loss']}", annotation_font_color="#ef5350",
+                  annotation_font_size=9, row=1, col=1)
     fig.add_hline(y=res["target"], line=dict(color="#26a69a", dash="dash", width=1),
-                  annotation_text=f"TGT {res['target']}", annotation_font_color="#26a69a",
-                  annotation_font_size=10)
-
+                  annotation_text=f"TGT ₹{res['target']}", annotation_font_color="#26a69a",
+                  annotation_font_size=9, row=1, col=1)
     fig.update_layout(
-        height=350,
-        template="plotly_dark",
-        paper_bgcolor="#131722",
-        plot_bgcolor="#131722",
-        font=dict(family="Inter, Trebuchet MS", size=11, color="#787b86"),
-        xaxis=dict(
-            gridcolor="#1e222d", rangeslider_visible=False,
-            showline=True, linecolor="#2a2e39",
-        ),
+        height=height, template="plotly_dark", paper_bgcolor="#131722", plot_bgcolor="#131722",
+        font=dict(family="Inter", size=10, color="#787b86"),
+        xaxis2=dict(gridcolor="#1e222d", showline=True, linecolor="#2a2e39"),
         yaxis=dict(gridcolor="#1e222d", side="right", showline=True, linecolor="#2a2e39"),
-        yaxis2=dict(overlaying="y", side="left", showgrid=False, visible=False,
-                    range=[0, float(vol.max()) * 4]),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                    bgcolor="rgba(0,0,0,0)", font=dict(size=10)),
-        margin=dict(l=0, r=50, t=10, b=0),
+        yaxis2=dict(gridcolor="#1e222d", showticklabels=False),
+        xaxis=dict(gridcolor="#1e222d", rangeslider_visible=False),
+        legend=dict(orientation="h", y=1.02, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)",
+                    font=dict(size=9)),
+        margin=dict(l=0, r=50, t=6, b=0),
     )
     return fig
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stock card renderer
-# ─────────────────────────────────────────────────────────────────────────────
-def render_stock_card(r: dict, show_chart: bool = True):
-    chg_cls = "tv-change-up" if r["pct_chg"] >= 0 else "tv-change-down"
-    chg_sign = "+" if r["pct_chg"] >= 0 else ""
-    badge = ('<span class="tv-badge tv-buy">BUY ZONE</span>' if r["full_pass"]
-             else '<span class="tv-badge tv-watch">WATCHLIST</span>')
-    clean = ('<span class="tv-badge tv-clean">CLEAN</span>' if r["is_clean"]
-             else '<span class="tv-badge tv-warn">FLAGS</span>')
-    setup_parts = []
-    if r["near_52w"]:
-        setup_parts.append("Near 52W High")
-    if r["breakout"]:
-        setup_parts.append("Breakout")
-    setup = " | ".join(setup_parts) if setup_parts else ""
+def _index_chart(api, name, exch, token, height=260):
+    df = _ohlcv(api, exch, token, 120)
+    if df.empty or len(df) < 5:
+        return None
+    c = df["close"].astype(float)
+    v = df["volume"].astype(float)
+    e20 = c.ewm(span=20, min_periods=1).mean()
+    color = "#26a69a" if float(c.iloc[-1]) >= float(c.iloc[-2]) else "#ef5350"
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[.8,.2],
+                        vertical_spacing=0.02)
+    fig.add_trace(go.Scatter(x=df["date"], y=c, name=name,
+                             line=dict(color=color, width=1.8),
+                             fill="tozeroy", fillcolor=color.replace(")", ",.06)").replace("rgb","rgba")),
+                  row=1, col=1)
+    fig.add_trace(go.Scatter(x=df["date"], y=e20, name="EMA 20",
+                             line=dict(color="#787b86", width=1, dash="dot")), row=1, col=1)
+    vc = ["rgba(100,100,100,.3)"] * len(v)
+    fig.add_trace(go.Bar(x=df["date"], y=v, marker_color=vc, showlegend=False), row=2, col=1)
+    fig.update_layout(
+        height=height, template="plotly_dark", paper_bgcolor="#131722", plot_bgcolor="#131722",
+        font=dict(family="Inter", size=9, color="#787b86"),
+        yaxis=dict(gridcolor="#1e222d", side="right"), yaxis2=dict(showticklabels=False, gridcolor="#1e222d"),
+        xaxis=dict(gridcolor="#1e222d", rangeslider_visible=False), xaxis2=dict(gridcolor="#1e222d"),
+        legend=dict(orientation="h", y=1.03, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)", font=dict(size=9)),
+        margin=dict(l=0, r=40, t=4, b=0),
+    )
+    return fig
 
-    sl_pct = round((r["ltp"] - r["stop_loss"]) / r["ltp"] * 100, 1)
-    tgt_pct = round((r["target"] - r["ltp"]) / r["ltp"] * 100, 1)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CARD RENDERER
+# ═══════════════════════════════════════════════════════════════════════════
+def _card(r, chart=True):
+    chg_cls = "tv-up" if r["pct_chg"] >= 0 else "tv-down"
+    chg_s   = f"+{r['pct_chg']}%" if r["pct_chg"] >= 0 else f"{r['pct_chg']}%"
+    badge   = '<span class="tv-badge tv-buy">BUY ZONE</span>' if r["full_pass"] else '<span class="tv-badge tv-watch">WATCHLIST</span>'
+    cl_badge = '<span class="tv-badge tv-clean">CLEAN</span>' if r["is_clean"] else '<span class="tv-badge tv-dirty">FLAGS</span>'
+    tags = []
+    if r["near_52w"]: tags.append("52W HIGH")
+    if r["breakout"]: tags.append("BREAKOUT")
+    tag_html = " ".join(f'<span style="color:#787b86;font-size:.68rem;background:#131722;padding:1px 6px;border-radius:3px">{t}</span>' for t in tags)
+    sl_p = round((r["ltp"]-r["stop_loss"])/r["ltp"]*100,1)
+    tgt_p = round((r["target"]-r["ltp"])/r["ltp"]*100,1)
 
     st.markdown(f"""
-<div class="tv-stock-card">
-    <div class="tv-header">
-        <span class="tv-ticker">{r['symbol']}</span>
-        {badge} {clean}
-        <span style="margin-left:auto; font-size:.8rem; color:#787b86">{r['trend']}</span>
-    </div>
-    <div style="display:flex; align-items:baseline; gap:12px; margin-bottom:6px;">
-        <span class="tv-price">₹{r['ltp']}</span>
-        <span class="{chg_cls}">{chg_sign}{r['pct_chg']}%</span>
-        <span style="color:#787b86; font-size:.78rem">{setup}</span>
-    </div>
-    <div class="tv-risk-grid">
-        <div class="tv-risk-item">
-            <div class="tv-label">RSI(14)</div>
-            <div class="tv-value">{r['rsi']}</div>
-        </div>
-        <div class="tv-risk-item">
-            <div class="tv-label">Vol Surge</div>
-            <div class="tv-value">{r['vol_surge']}x</div>
-        </div>
-        <div class="tv-risk-item">
-            <div class="tv-label">Stop-Loss</div>
-            <div class="tv-value" style="color:#ef5350">₹{r['stop_loss']} (-{sl_pct}%)</div>
-        </div>
-        <div class="tv-risk-item">
-            <div class="tv-label">Target</div>
-            <div class="tv-value" style="color:#26a69a">₹{r['target']} (+{tgt_pct}%)</div>
-        </div>
-        <div class="tv-risk-item">
-            <div class="tv-label">R : R</div>
-            <div class="tv-value">1 : {r['rr']}</div>
-        </div>
-        <div class="tv-risk-item">
-            <div class="tv-label">ATR(14)</div>
-            <div class="tv-value">₹{r['atr']}</div>
-        </div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+<div class="tv-card">
+  <div class="tv-row" style="margin-bottom:6px;">
+    <span class="tv-sym">{r['symbol']}</span>
+    <span class="tv-exch">{r['exchange']}</span>
+    {badge} {cl_badge} {tag_html}
+    <span style="margin-left:auto;font-size:.75rem;color:#787b86">{r['trend']}</span>
+  </div>
+  <div class="tv-row" style="margin-bottom:8px;">
+    <span class="tv-price">₹{r['ltp']}</span>
+    <span class="{chg_cls}" style="font-size:.9rem;font-weight:600">{chg_s}</span>
+  </div>
+  <div class="tv-grid">
+    <div class="tv-cell"><div class="tv-lbl">RSI</div><div class="tv-val">{r['rsi']}</div></div>
+    <div class="tv-cell"><div class="tv-lbl">Vol Surge</div><div class="tv-val">{r['vol_surge']}×</div></div>
+    <div class="tv-cell"><div class="tv-lbl">Stop-Loss</div><div class="tv-val" style="color:#ef5350">₹{r['stop_loss']} <small>−{sl_p}%</small></div></div>
+    <div class="tv-cell"><div class="tv-lbl">Target</div><div class="tv-val" style="color:#26a69a">₹{r['target']} <small>+{tgt_p}%</small></div></div>
+    <div class="tv-cell"><div class="tv-lbl">R : R</div><div class="tv-val">1 : {r['rr']}</div></div>
+    <div class="tv-cell"><div class="tv-lbl">ATR</div><div class="tv-val">₹{r['atr']}</div></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    if show_chart and "df" in r and not r["df"].empty:
-        st.plotly_chart(_tv_chart(r), use_container_width=True, key=f"chart_{r['symbol']}")
+    if chart and "df" in r and not r["df"].empty:
+        st.plotly_chart(_tv_chart(r), use_container_width=True, key=f"ch_{r['exchange']}_{r['symbol']}")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
 # MAIN UI
-# ═════════════════════════════════════════════════════════════════════════════
-
-# Header
-now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
-is_market = 9 * 60 + 15 <= now_ist.hour * 60 + now_ist.minute <= 15 * 60 + 30
-mkt_badge = ('<span class="tv-live">● MARKET OPEN</span>'
-             if is_market else '<span style="color:#ef5350">● MARKET CLOSED</span>')
+# ═══════════════════════════════════════════════════════════════════════════
+now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+is_mkt = 9*60+15 <= now.hour*60+now.minute <= 15*60+30
+mkt_html = '<span class="tv-live">● LIVE</span>' if is_mkt else '<span style="color:#ef5350;font-weight:600;font-size:.8rem">● CLOSED</span>'
 
 st.markdown(f"""
-<div style="display:flex; align-items:center; gap:16px; margin-bottom:4px;">
-    <span style="font-size:1.6rem; font-weight:700; color:#d1d4dc;">🎯 Aggressive Screener</span>
-    {mkt_badge}
-    <span style="margin-left:auto; color:#787b86; font-size:.82rem;">
-        {now_ist.strftime('%d %b %Y  %H:%M IST')}
-    </span>
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:2px;">
+  <span style="font-size:1.5rem;font-weight:800;color:#d1d4dc;letter-spacing:-.5px">🎯 Aggressive Screener</span>
+  {mkt_html}
+  <span style="margin-left:auto;color:#787b86;font-size:.78rem">{now.strftime('%d %b %Y  %H:%M IST')}</span>
 </div>
-<div style="color:#787b86; font-size:.82rem; margin-bottom:16px;">
-    Full-Market NSE Scan · Shoonya Live API ·
-    6-Criteria + Anti-Manipulation · ATR Risk Management
+<div style="color:#787b86;font-size:.78rem;margin-bottom:12px;">
+  NSE + BSE Full Market · All Penny & Mid-Cap · Shoonya Live API · 6-Criteria + Anti-Manipulation
 </div>
 """, unsafe_allow_html=True)
 
 # Login
-api, login_info = get_shoonya_api()
+api, uname = _login()
 if not api:
-    st.error(f"Shoonya login failed: {login_info}")
-    st.stop()
+    st.error(f"Login failed: {uname}"); st.stop()
 
-# Load scripmaster
-with st.spinner("Loading NSE scripmaster (all equities)..."):
-    scripmaster = load_nse_scripmaster()
+# Scripmaster
+with st.spinner("Loading NSE + BSE scripmaster…"):
+    scrip = _load_scripmaster()
+if scrip.empty:
+    st.error("Could not load scripmaster"); st.stop()
 
-if scripmaster.empty:
-    st.error("Could not load NSE scripmaster. Check internet connection.")
-    st.stop()
+nse_count = int((scrip["Exchange"]=="NSE").sum())
+bse_count = int((scrip["Exchange"]=="BSE").sum())
+total = len(scrip)
 
-total_stocks = len(scripmaster)
+# ═══════════════════════════════════════════════════════════════════════════
+# INDEX TICKER TAPE
+# ═══════════════════════════════════════════════════════════════════════════
+idx_data = []
+for name, exch, tok in INDICES:
+    q = _q(api, exch, tok)
+    if q:
+        idx_data.append({"name": name, "ltp": q["ltp"],
+                         "pct": round(((q["ltp"]-q["pdcl"])/max(q["pdcl"],.01))*100, 2) if q.get("pdcl") else 0})
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown(f"""
-    <div style="text-align:center; padding:8px 0;">
-        <div style="font-size:.75rem; color:#787b86;">LOGGED IN</div>
-        <div style="font-size:.95rem; font-weight:600; color:#d1d4dc;">{login_info}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown("### Settings")
-
-    price_min = st.slider("Min Price", 5, 100, 20, format="₹%d")
-    price_max = st.slider("Max Price", 50, 500, 150, format="₹%d")
-    min_vol   = st.number_input("Min 20d Avg Volume", value=1_000_000, step=100_000,
-                                format="%d")
-    min_show  = st.slider("Min criteria for watchlist", 3, 6, 5)
-    show_ch   = st.checkbox("Show charts", value=True)
-
-    st.markdown("---")
-    st.markdown(f"""
-    <div style="text-align:center;">
-        <div style="font-size:2rem; font-weight:700; color:#2962ff;">{total_stocks:,}</div>
-        <div style="font-size:.78rem; color:#787b86;">NSE Equities Loaded</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
-
-    run_btn = st.button("🚀 SCAN ENTIRE MARKET", type="primary", use_container_width=True)
-
-    st.caption(
-        "Estimated time: ~3-5 min for full market.\n"
-        "Run during market hours for live volume signals."
-    )
-
-# ── Criteria info ─────────────────────────────────────────────────────────────
-with st.expander("📋 Screening Criteria & Risk Rules", expanded=False):
-    st.markdown(f"""
-| # | Filter | Rule |
-|---|--------|------|
-| 1 | **Price** | ₹{price_min} - ₹{price_max} |
-| 2 | **Liquidity** | 20d avg vol > {min_vol:,} |
-| 3 | **Volume Surge** | Today vol > 3x 20d avg |
-| 4 | **Momentum** | RSI(14): 60 - 80 |
-| 5 | **Price Action** | Within 2% of 52W high OR 4-week consolidation breakout |
-| 6 | **Circuit** | No upper/lower circuit in last 5 sessions |
-| + | **Anti-Manipulation** | No pump, no spike+dump, no frozen candles, no erratic volume |
-
-**Risk**: SL = min(5% hard, 1.5x ATR) floored at support. Target = nearest resistance or +20%
-    """)
+if idx_data:
+    items = ""
+    for d in idx_data:
+        cls = "tv-up" if d["pct"] >= 0 else "tv-down"
+        sign = "+" if d["pct"] >= 0 else ""
+        val = f"{d['ltp']:,.2f}"
+        items += f"""
+        <div class="tv-tape-item">
+          <div class="tv-tape-name">{d['name']}</div>
+          <div class="tv-tape-price">{val}</div>
+          <div class="tv-tape-chg {cls}">{sign}{d['pct']}%</div>
+        </div>"""
+    st.markdown(f'<div class="tv-tape">{items}</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Scan execution
-# ═════════════════════════════════════════════════════════════════════════════
-if run_btn:
-    t0 = time.time()
-    prog = st.progress(0)
-    status = st.empty()
+# ═══════════════════════════════════════════════════════════════════════════
+# TABS
+# ═══════════════════════════════════════════════════════════════════════════
+tab_idx, tab_scan, tab_about = st.tabs(["📊 Index Charts", "🔍 Full Market Scan", "ℹ️ About"])
 
-    def update_progress(pct, msg):
-        prog.progress(min(pct, 1.0))
-        status.markdown(f"<div style='color:#787b86; font-size:.85rem;'>{msg}</div>",
-                        unsafe_allow_html=True)
-
-    # ── Phase 1 ───────────────────────────────────────────────────────────────
-    update_progress(0, f"Phase 1: Scanning {total_stocks:,} stocks for price ₹{price_min}-{price_max}...")
-    p1 = phase1_price_filter(api, scripmaster, price_min, price_max, update_progress)
-
-    # ── Phase 2 ───────────────────────────────────────────────────────────────
-    update_progress(0, f"Phase 2: Volume pre-filter on {len(p1)} stocks...")
-    p2 = phase2_volume_filter(p1, min_vol)
-    update_progress(1.0, f"Phase 2 done — {len(p2)} pass volume pre-filter")
-
-    # ── Phase 3 ───────────────────────────────────────────────────────────────
-    update_progress(0, f"Phase 3: Deep analysis on {len(p2)} stocks...")
-    p3 = phase3_deep_analysis(api, p2, update_progress)
-
-    elapsed = round(time.time() - t0, 1)
-    prog.empty()
-    status.empty()
-
-    # Categorise
-    actionable = sorted([r for r in p3 if r["full_pass"]],
-                        key=lambda x: x["rr"], reverse=True)
-    watchlist  = sorted([r for r in p3 if not r["full_pass"] and r["crit_met"] >= min_show],
-                        key=lambda x: x["crit_met"], reverse=True)
-
-    # ── Summary bar ───────────────────────────────────────────────────────────
-    st.markdown(f"""
-<div style="background:#1e222d; border:1px solid #2a2e39; border-radius:10px;
-            padding:16px 24px; display:flex; justify-content:space-between;
-            align-items:center; margin:12px 0;">
-    <div style="text-align:center;">
-        <div style="font-size:1.5rem; font-weight:700; color:#2962ff;">{total_stocks:,}</div>
-        <div style="font-size:.72rem; color:#787b86;">SCANNED</div>
-    </div>
-    <div style="text-align:center;">
-        <div style="font-size:1.5rem; font-weight:700; color:#d1d4dc;">{len(p1)}</div>
-        <div style="font-size:.72rem; color:#787b86;">IN PRICE RANGE</div>
-    </div>
-    <div style="text-align:center;">
-        <div style="font-size:1.5rem; font-weight:700; color:#ffb74d;">{len(p2)}</div>
-        <div style="font-size:.72rem; color:#787b86;">VOLUME OK</div>
-    </div>
-    <div style="text-align:center;">
-        <div style="font-size:1.5rem; font-weight:700; color:#26a69a;">{len(actionable)}</div>
-        <div style="font-size:.72rem; color:#787b86;">ACTIONABLE</div>
-    </div>
-    <div style="text-align:center;">
-        <div style="font-size:1.5rem; font-weight:700; color:#ffb74d;">{len(watchlist)}</div>
-        <div style="font-size:.72rem; color:#787b86;">WATCHLIST</div>
-    </div>
-    <div style="text-align:center;">
-        <div style="font-size:.9rem; color:#787b86;">{elapsed}s</div>
-        <div style="font-size:.72rem; color:#787b86;">ELAPSED</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-    # ── No results ────────────────────────────────────────────────────────────
-    if not actionable and not watchlist:
-        st.markdown("""
-<div style="background:#1e222d; border:1px solid #ef5350; border-radius:10px;
-            padding:24px; text-align:center; margin:16px 0;">
-    <div style="font-size:1.3rem; font-weight:700; color:#ef5350;">HOLD CASH</div>
-    <div style="color:#787b86; margin-top:8px;">
-        No stocks pass all 6 criteria with clean manipulation status.<br>
-        Run during market hours (9:15-15:30 IST) for live volume data.
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-    # ── Actionable ────────────────────────────────────────────────────────────
-    if actionable:
-        st.markdown(f"""
-<div style="margin:20px 0 10px;">
-    <span style="font-size:1.2rem; font-weight:700; color:#26a69a;">
-        ACTIONABLE — {len(actionable)} Stock{'s' if len(actionable)>1 else ''}
-    </span>
-    <span style="color:#787b86; font-size:.82rem; margin-left:8px;">
-        All 6 criteria passed - No manipulation flags - Trade-ready
-    </span>
-</div>
-""", unsafe_allow_html=True)
-
-        # Summary table
-        tbl = []
-        for r in actionable:
-            chg_s = f"+{r['pct_chg']}%" if r["pct_chg"] >= 0 else f"{r['pct_chg']}%"
-            tbl.append({
-                "Symbol":    r["symbol"],
-                "LTP":       r["ltp"],
-                "Change":    chg_s,
-                "RSI":       r["rsi"],
-                "VolSurge":  r["vol_surge"],
-                "SL":        r["stop_loss"],
-                "TGT":       r["target"],
-                "R:R":       r["rr"],
-                "Trend":     r["trend"],
-            })
-        st.dataframe(pd.DataFrame(tbl), use_container_width=True, hide_index=True)
-
-        # Cards
-        for r in actionable:
-            render_stock_card(r, show_chart=show_ch)
-
-            with st.expander(f"📐 {r['symbol']} — Full Detail"):
-                dc1, dc2, dc3 = st.columns(3)
-                for j, (name, val) in enumerate(r["criteria"].items()):
-                    [dc1, dc2, dc3][j % 3].markdown(f"{'✅' if val else '❌'} {name}")
+# ── Tab 1: Index Charts ──────────────────────────────────────────────────
+with tab_idx:
+    st.markdown("### Market Indices — Live Charts")
+    cols = st.columns(2)
+    for i, (name, exch, tok) in enumerate(INDICES):
+        if name == "INDIA VIX":
+            continue  # VIX has no OHLCV
+        with cols[i % 2]:
+            # header
+            q = _q(api, exch, tok)
+            if q:
+                cls = "tv-up" if q.get("ltp",0) >= q.get("pdcl", q.get("ltp",0)) else "tv-down"
+                pct = round(((q["ltp"]-q.get("pdcl",q["ltp"]))/max(q.get("pdcl",q["ltp"]),.01))*100, 2)
+                sign = "+" if pct >= 0 else ""
                 st.markdown(f"""
-| Field | Value |  | Field | Value |
-|-------|-------|--|-------|-------|
-| Entry | ₹{r['ltp']} | | ATR(14) | ₹{r['atr']} |
-| Stop-Loss | ₹{r['stop_loss']} (-{round((r['ltp']-r['stop_loss'])/r['ltp']*100,1)}%) | | EMA20 | ₹{r['ema20']} |
-| Target | ₹{r['target']} (+{round((r['target']-r['ltp'])/r['ltp']*100,1)}%) | | EMA50 | ₹{r['ema50']} |
-| Risk | ₹{r['risk']} | | 52W High | ₹{r['h52']} |
-| Reward | ₹{r['reward']} | | Avg 20d Vol | {r['avg_vol20']:,} |
-| R:R | 1 : {r['rr']} | | Today Vol | {r['today_vol']:,} |
-                """)
+<div style="background:#1e222d;border:1px solid #2a2e39;border-radius:8px;padding:10px 16px;margin-bottom:4px;">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-weight:700;color:#d1d4dc;font-size:1rem;">{name}</span>
+    <span style="font-weight:700;color:#d1d4dc;font-size:1.1rem;">{q['ltp']:,.2f}</span>
+    <span class="{cls}" style="font-weight:600;font-size:.85rem;">{sign}{pct}%</span>
+    <span style="margin-left:auto;color:#787b86;font-size:.7rem;">O {q.get('open',0):,.2f}  H {q.get('high',0):,.2f}  L {q.get('low',0):,.2f}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+            fig = _index_chart(api, name, exch, tok)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=f"idx_{tok}")
 
-    # ── Watchlist ─────────────────────────────────────────────────────────────
-    if watchlist:
+# ── Tab 2: Full Market Scan ──────────────────────────────────────────────
+with tab_scan:
+    # Sidebar
+    with st.sidebar:
         st.markdown(f"""
-<div style="margin:24px 0 10px;">
-    <span style="font-size:1.2rem; font-weight:700; color:#ffb74d;">
-        WATCHLIST — {len(watchlist)} Stock{'s' if len(watchlist)>1 else ''}
-    </span>
-    <span style="color:#787b86; font-size:.82rem; margin-left:8px;">
-        {min_show}+ criteria met - Monitor for entry
-    </span>
-</div>
-""", unsafe_allow_html=True)
-
-        wl_tbl = []
-        for r in watchlist:
-            chg_s = f"+{r['pct_chg']}%" if r["pct_chg"] >= 0 else f"{r['pct_chg']}%"
-            wl_tbl.append({
-                "Symbol":   r["symbol"],
-                "LTP":      r["ltp"],
-                "Change":   chg_s,
-                "RSI":      r["rsi"],
-                "VolSurge": r["vol_surge"],
-                "Criteria": f"{r['crit_met']}/6",
-                "SL":       r["stop_loss"],
-                "TGT":      r["target"],
-                "R:R":      r["rr"],
-                "Flags":    " | ".join(r["m_flags"]) or "Clean",
-            })
-        st.dataframe(pd.DataFrame(wl_tbl), use_container_width=True, hide_index=True)
-
-        for r in watchlist:
-            render_stock_card(r, show_chart=show_ch)
-
-    # ── Full scan log ─────────────────────────────────────────────────────────
-    with st.expander(f"📋 Full Scan Log — {len(p3)} stocks deep-analysed"):
-        log_tbl = [{
-            "Symbol":  r["symbol"],
-            "LTP":     r["ltp"],
-            "RSI":     r["rsi"],
-            "VolSurge":r["vol_surge"],
-            "Crit":    f"{r['crit_met']}/6",
-            "Clean":   "Y" if r["is_clean"] else "N",
-            "Flags":   ", ".join(r["m_flags"][:2]) or "-",
-        } for r in sorted(p3, key=lambda x: x["crit_met"], reverse=True)]
-        st.dataframe(pd.DataFrame(log_tbl), use_container_width=True, hide_index=True)
-
-else:
-    # ── Landing page ──────────────────────────────────────────────────────────
-    st.markdown(f"""
-<div style="background:#1e222d; border:1px solid #2a2e39; border-radius:12px;
-            padding:30px; text-align:center; margin:20px 0;">
-    <div style="font-size:2.5rem; font-weight:700; color:#2962ff;">{total_stocks:,}</div>
-    <div style="color:#787b86; font-size:1rem; margin-top:4px;">NSE Equities Ready to Scan</div>
-    <div style="margin-top:16px; color:#787b86; font-size:.85rem;">
-        Click <b style="color:#2962ff;">SCAN ENTIRE MARKET</b> in the sidebar to begin
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("""
-<div class="tv-stock-card" style="text-align:center;">
-    <div style="font-size:1.5rem;">⚡</div>
-    <div style="font-weight:600; color:#d1d4dc; margin:6px 0;">3-Phase Progressive Scan</div>
-    <div style="color:#787b86; font-size:.82rem;">
-        Price filter → Volume filter → Deep analysis<br>
-        Scans 2,400+ stocks in ~3 min
-    </div>
+<div style="text-align:center;padding:6px 0;">
+  <div style="font-size:.7rem;color:#787b86;">LOGGED IN</div>
+  <div style="font-weight:600;color:#d1d4dc;font-size:.9rem;">{uname}</div>
 </div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown("""
-<div class="tv-stock-card" style="text-align:center;">
-    <div style="font-size:1.5rem;">🛡️</div>
-    <div style="font-weight:600; color:#d1d4dc; margin:6px 0;">Anti-Manipulation Guard</div>
-    <div style="color:#787b86; font-size:.82rem;">
-        Pump detection · Spike+dump filter<br>
-        Circuit guard · Operator volume check
+        st.markdown("---")
+        st.markdown("### ⚙️ Scan Settings")
+        exch_opt = st.multiselect("Exchanges", ["NSE", "BSE"], default=["NSE", "BSE"])
+        price_min = st.slider("Min Price ₹", 1, 100, 10)
+        price_max = st.slider("Max Price ₹", 20, 500, 150)
+        min_vol   = st.number_input("Min 20d Avg Volume", value=500_000, step=100_000, format="%d")
+        min_show  = st.slider("Min criteria for watchlist", 3, 6, 4)
+        show_ch   = st.checkbox("Show charts", value=True)
+
+        st.markdown("---")
+        st.markdown(f"""
+<div style="text-align:center;">
+  <div style="display:flex;justify-content:center;gap:20px;">
+    <div>
+      <div style="font-size:1.5rem;font-weight:700;color:#2962ff;">{nse_count:,}</div>
+      <div style="font-size:.68rem;color:#787b86;">NSE</div>
     </div>
+    <div>
+      <div style="font-size:1.5rem;font-weight:700;color:#ff9800;">{bse_count:,}</div>
+      <div style="font-size:.68rem;color:#787b86;">BSE</div>
+    </div>
+    <div>
+      <div style="font-size:1.5rem;font-weight:700;color:#26a69a;">{total:,}</div>
+      <div style="font-size:.68rem;color:#787b86;">TOTAL</div>
+    </div>
+  </div>
 </div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown("""
-<div class="tv-stock-card" style="text-align:center;">
-    <div style="font-size:1.5rem;">📐</div>
-    <div style="font-weight:600; color:#d1d4dc; margin:6px 0;">Smart Risk Management</div>
-    <div style="color:#787b86; font-size:.82rem;">
-        ATR-based stop-loss · Swing S/R levels<br>
-        R:R ratio · Position sizing ready
-    </div>
+        st.markdown("---")
+        run = st.button("🚀 SCAN ENTIRE MARKET", type="primary", use_container_width=True)
+        st.caption("~4-8 min for full NSE+BSE scan.\nBest during market hours 9:15-15:30 IST.")
+
+    # Criteria info
+    with st.expander("📋 Screening Criteria & Risk Rules", expanded=False):
+        st.markdown(f"""
+| # | Filter | Rule |
+|---|--------|------|
+| 1 | **Price** | ₹{price_min} – ₹{price_max} |
+| 2 | **Liquidity** | 20d avg vol > {min_vol:,} |
+| 3 | **Volume Surge** | Today vol > 3× 20d avg |
+| 4 | **Momentum** | RSI(14): 60 – 80 |
+| 5 | **Price Action** | Within 2% of 52W high OR consolidation breakout |
+| 6 | **Circuit** | No circuit hit in last 5 sessions |
+| + | **Anti-Manipulation** | No pump, spike+dump, frozen candles, erratic vol |
+
+**Risk**: SL = min(5% hard, 1.5× ATR) floored at support · Target = resistance or +20%
+        """)
+
+    st.markdown("---")
+
+    if run:
+        # Filter by selected exchanges
+        scan_df = scrip[scrip["Exchange"].isin(exch_opt)].reset_index(drop=True)
+        scan_total = len(scan_df)
+
+        t0 = time.time()
+        prog = st.progress(0); status = st.empty()
+        def cb(p, m):
+            prog.progress(min(p,1.0))
+            status.markdown(f"<div style='color:#787b86;font-size:.82rem;'>{m}</div>", unsafe_allow_html=True)
+
+        cb(0, f"Phase 1: Scanning {scan_total:,} stocks across {', '.join(exch_opt)}…")
+        p1 = phase1(api, scan_df, price_min, price_max, cb)
+        cb(0, f"Phase 2: Volume pre-filter on {len(p1):,} stocks…")
+        p2 = phase2(p1, min_vol)
+        cb(1.0, f"Phase 2 done — {len(p2):,} pass volume pre-filter")
+        cb(0, f"Phase 3: Deep analysis on {len(p2):,} stocks…")
+        p3 = phase3(api, p2, cb)
+        elapsed = round(time.time()-t0, 1)
+        prog.empty(); status.empty()
+
+        actionable = sorted([r for r in p3 if r["full_pass"]], key=lambda x: x["rr"], reverse=True)
+        watchlist  = sorted([r for r in p3 if not r["full_pass"] and r["crit_met"]>=min_show],
+                            key=lambda x: x["crit_met"], reverse=True)
+
+        # Summary bar
+        st.markdown(f"""
+<div style="background:#1e222d;border:1px solid #2a2e39;border-radius:10px;padding:14px 20px;
+            display:flex;justify-content:space-between;align-items:center;margin:10px 0;">
+  <div style="text-align:center"><div style="font-size:1.4rem;font-weight:700;color:#2962ff">{scan_total:,}</div><div style="font-size:.68rem;color:#787b86">SCANNED</div></div>
+  <div style="text-align:center"><div style="font-size:1.4rem;font-weight:700;color:#d1d4dc">{len(p1):,}</div><div style="font-size:.68rem;color:#787b86">PRICE RANGE</div></div>
+  <div style="text-align:center"><div style="font-size:1.4rem;font-weight:700;color:#ffb74d">{len(p2):,}</div><div style="font-size:.68rem;color:#787b86">VOL PRE-PASS</div></div>
+  <div style="text-align:center"><div style="font-size:1.4rem;font-weight:700;color:#26a69a">{len(actionable)}</div><div style="font-size:.68rem;color:#787b86">ACTIONABLE</div></div>
+  <div style="text-align:center"><div style="font-size:1.4rem;font-weight:700;color:#ffb74d">{len(watchlist)}</div><div style="font-size:.68rem;color:#787b86">WATCHLIST</div></div>
+  <div style="text-align:center"><div style="font-size:.85rem;color:#787b86">{elapsed}s</div><div style="font-size:.68rem;color:#787b86">TIME</div></div>
 </div>""", unsafe_allow_html=True)
 
+        if not actionable and not watchlist:
+            st.markdown("""
+<div style="background:#1e222d;border:1px solid #ef5350;border-radius:10px;padding:20px;text-align:center;margin:14px 0;">
+  <div style="font-size:1.2rem;font-weight:700;color:#ef5350">🚨 HOLD CASH</div>
+  <div style="color:#787b86;margin-top:6px;">No stocks pass all 6 criteria. Try during market hours for live volume data.</div>
+</div>""", unsafe_allow_html=True)
+
+        if actionable:
+            st.markdown(f"""
+<div style="margin:16px 0 8px;">
+  <span style="font-size:1.1rem;font-weight:700;color:#26a69a">🟢 ACTIONABLE — {len(actionable)} Stock{'s' if len(actionable)>1 else ''}</span>
+  <span style="color:#787b86;font-size:.78rem;margin-left:8px;">All 6 criteria · No manipulation · Trade-ready</span>
+</div>""", unsafe_allow_html=True)
+            tbl = [{
+                "Symbol": r["symbol"], "Exch": r["exchange"], "LTP": r["ltp"],
+                "Chg%": f"+{r['pct_chg']}%" if r["pct_chg"]>=0 else f"{r['pct_chg']}%",
+                "RSI": r["rsi"], "Vol×": r["vol_surge"],
+                "SL": r["stop_loss"], "TGT": r["target"], "R:R": r["rr"], "Trend": r["trend"],
+            } for r in actionable]
+            st.dataframe(pd.DataFrame(tbl), use_container_width=True, hide_index=True)
+            for r in actionable:
+                _card(r, show_ch)
+
+        if watchlist:
+            st.markdown(f"""
+<div style="margin:20px 0 8px;">
+  <span style="font-size:1.1rem;font-weight:700;color:#ffb74d">🟡 WATCHLIST — {len(watchlist)} Stock{'s' if len(watchlist)>1 else ''}</span>
+  <span style="color:#787b86;font-size:.78rem;margin-left:8px;">{min_show}+ criteria met · Monitor for entry</span>
+</div>""", unsafe_allow_html=True)
+            wl = [{
+                "Symbol": r["symbol"], "Exch": r["exchange"], "LTP": r["ltp"],
+                "Chg%": f"+{r['pct_chg']}%" if r["pct_chg"]>=0 else f"{r['pct_chg']}%",
+                "RSI": r["rsi"], "Vol×": r["vol_surge"], "Crit": f"{r['crit_met']}/6",
+                "SL": r["stop_loss"], "TGT": r["target"], "R:R": r["rr"],
+                "Flags": " | ".join(r["m_flags"][:2]) or "Clean",
+            } for r in watchlist]
+            st.dataframe(pd.DataFrame(wl), use_container_width=True, hide_index=True)
+            for r in watchlist:
+                _card(r, show_ch)
+
+        with st.expander(f"📋 Full Scan Log — {len(p3)} stocks"):
+            log = [{
+                "Symbol": r["symbol"], "Exch": r["exchange"], "LTP": r["ltp"],
+                "RSI": r["rsi"], "Vol×": r["vol_surge"], "Crit": f"{r['crit_met']}/6",
+                "Clean": "✅" if r["is_clean"] else "⚠️",
+            } for r in sorted(p3, key=lambda x: x["crit_met"], reverse=True)]
+            st.dataframe(pd.DataFrame(log), use_container_width=True, hide_index=True)
+
+    else:
+        # Landing
+        st.markdown(f"""
+<div style="background:#1e222d;border:1px solid #2a2e39;border-radius:12px;padding:28px;text-align:center;margin:16px 0;">
+  <div style="display:flex;justify-content:center;gap:36px;margin-bottom:12px;">
+    <div>
+      <div style="font-size:2.2rem;font-weight:800;color:#2962ff">{nse_count:,}</div>
+      <div style="font-size:.8rem;color:#787b86;">NSE Stocks</div>
+    </div>
+    <div style="font-size:2.2rem;color:#2a2e39;font-weight:300">+</div>
+    <div>
+      <div style="font-size:2.2rem;font-weight:800;color:#ff9800">{bse_count:,}</div>
+      <div style="font-size:.8rem;color:#787b86;">BSE Stocks</div>
+    </div>
+    <div style="font-size:2.2rem;color:#2a2e39;font-weight:300">=</div>
+    <div>
+      <div style="font-size:2.2rem;font-weight:800;color:#26a69a">{total:,}</div>
+      <div style="font-size:.8rem;color:#787b86;">Total Universe</div>
+    </div>
+  </div>
+  <div style="color:#787b86;font-size:.85rem;margin-top:8px;">
+    Click <b style="color:#2962ff">🚀 SCAN ENTIRE MARKET</b> in the sidebar
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("""
+<div class="tv-card" style="text-align:center;"><div style="font-size:1.4rem">⚡</div>
+<div style="font-weight:600;color:#d1d4dc;margin:4px 0">3-Phase Progressive Scan</div>
+<div style="color:#787b86;font-size:.78rem">Price → Volume → Deep Analysis<br>12 concurrent threads for speed</div></div>""", unsafe_allow_html=True)
+        with c2:
+            st.markdown("""
+<div class="tv-card" style="text-align:center;"><div style="font-size:1.4rem">🛡️</div>
+<div style="font-weight:600;color:#d1d4dc;margin:4px 0">Anti-Manipulation Guard</div>
+<div style="color:#787b86;font-size:.78rem">Pump · Spike+Dump · Frozen candles<br>Circuit breaker · Erratic volume</div></div>""", unsafe_allow_html=True)
+        with c3:
+            st.markdown("""
+<div class="tv-card" style="text-align:center;"><div style="font-size:1.4rem">📐</div>
+<div style="font-weight:600;color:#d1d4dc;margin:4px 0">ATR Risk Management</div>
+<div style="color:#787b86;font-size:.78rem">Smart stop-loss · Support/Resistance<br>R:R ratio · Position sizing ready</div></div>""", unsafe_allow_html=True)
+
+        st.markdown("""
+<div style="background:#131722;border:1px solid #2a2e39;border-radius:8px;padding:14px 18px;margin-top:14px;color:#787b86;font-size:.78rem;">
+  <b style="color:#ffb74d">Best during market hours (9:15-15:30 IST)</b><br>
+  Volume surge is only meaningful with live intraday data. Penny stocks (₹1-20) included with BSE exchange.
+</div>""", unsafe_allow_html=True)
+
+# ── Tab 3: About ─────────────────────────────────────────────────────────
+with tab_about:
     st.markdown("""
-<div style="background:#131722; border:1px solid #2a2e39; border-radius:8px;
-            padding:16px 20px; margin-top:16px; color:#787b86; font-size:.82rem;">
-    <b style="color:#ffb74d;">Best during market hours (9:15-15:30 IST)</b><br>
-    Volume surge criterion is only meaningful with live intraday volume data.
-    After-hours scans won't trigger Volume Surge 3x criteria.
-</div>
-""", unsafe_allow_html=True)
+### How It Works
+
+**3-Phase Progressive Scan** ensures speed even with 5,300+ stocks:
+
+1. **Phase 1 — Price Filter** (12 threads)
+   - Fetches live quotes for every NSE + BSE equity simultaneously
+   - Drops everything outside your price range instantly
+
+2. **Phase 2 — Volume Pre-Filter**
+   - Uses today's volume as a quick proxy
+   - Eliminates illiquid stocks before expensive OHLCV fetch
+
+3. **Phase 3 — Deep Analysis**
+   - Fetches 290-day OHLCV history for survivors
+   - Computes RSI, ATR, EMA 20/50, volume averages
+   - Checks consolidation breakout, 52W proximity, circuit history
+   - Runs anti-manipulation scan (5 checks)
+   - Calculates ATR-based stop-loss, support/resistance target, R:R ratio
+
+### Exchanges
+
+| Exchange | Instruments | Types |
+|----------|-------------|-------|
+| **NSE** | ~3,100 | EQ (main), SM (SME), ST (startup), BE (trade-to-trade) |
+| **BSE** | ~2,900 | Groups A, B, M, T, Z — all penny stocks included |
+
+### Indices Tracked
+
+| Index | Description |
+|-------|-------------|
+| NIFTY 50 | Top 50 large-cap |
+| BANK NIFTY | Banking sector |
+| FINNIFTY | Financial services |
+| MIDCAP NIFTY | Mid-cap select |
+| NIFTY NEXT 50 | Next 50 after NIFTY |
+| INDIA VIX | Volatility index |
+    """)
