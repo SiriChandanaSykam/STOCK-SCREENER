@@ -19,7 +19,7 @@ import pandas as pd
 
 # Shoonya API is optional at import time (same pattern as data_ingestion.py)
 try:
-    from NorenRestApiPy.NorenRestApi import NorenApi  # type: ignore[import]
+    from NorenRestApiPy.NorenApi import NorenApi  # type: ignore[import]
     NOREN_AVAILABLE = True
 except ImportError:
     NOREN_AVAILABLE = False
@@ -126,11 +126,30 @@ def bootstrap_seed_data(api: Optional[object] = None) -> None:
     fetched = 0
 
     for sym in SYMBOLS:
-        df = _fetch_symbol_history(api, sym)
+        # Resolve numeric token for this symbol
+        token = None
+        try:
+            resp = api.searchscrip(exchange=NSE_EXCHANGE, searchtext=sym)
+            if resp and resp.get("stat") == "Ok":
+                values = resp.get("values", [])
+                for item in values:
+                    if item.get("tsym") == sym:
+                        token = item.get("token")
+                        break
+                if token is None and values:
+                    token = values[0].get("token")
+        except Exception as exc:
+            logger.warning("Token resolution for %s failed: %s", sym, exc)
+
+        if not token:
+            logger.warning("Could not resolve token for %s — skipping seed", sym)
+            continue
+
+        df = _fetch_symbol_history(api, token)
         if not df.empty:
             SEED_DATA[sym] = df
             fetched += 1
-            logger.debug("Seeded %s with %d rows", sym, len(df))
+            logger.debug("Seeded %s (token %s) with %d rows", sym, token, len(df))
         else:
             logger.warning("Could not seed %s — proceeding without historical data", sym)
 

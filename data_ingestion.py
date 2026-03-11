@@ -20,13 +20,14 @@ from threading import Lock
 
 import pyotp
 from dotenv import load_dotenv
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Shoonya API import — optional at import time so that the module can be
 # imported even when NorenRestApiPy is not installed (e.g. during linting).
 # ---------------------------------------------------------------------------
 try:
-    from NorenRestApiPy.NorenRestApi import NorenApi  # type: ignore[import]
+    from NorenRestApiPy.NorenApi import NorenApi  # type: ignore[import]
     NOREN_AVAILABLE = True
 except ImportError:
     NOREN_AVAILABLE = False
@@ -60,8 +61,15 @@ ws_connected: bool = False
 # Helper: generate TOTP from secret
 # ---------------------------------------------------------------------------
 def _get_totp(secret: str) -> str:
-    """Return the current 6-digit TOTP code."""
-    return pyotp.TOTP(secret).now()
+    """Return the 2FA code.
+    If the secret is purely numeric (static PIN / DOB), return it as-is.
+    Otherwise treat it as a base32 TOTP secret and generate a live OTP.
+    """
+    clean = secret.replace("-", "").replace(" ", "").strip()
+    if clean.isdigit():
+        # Static PIN (e.g. date of birth DDMMYYYY or a fixed OTP PIN)
+        return clean
+    return pyotp.TOTP(clean.upper()).now()
 
 
 # ---------------------------------------------------------------------------
@@ -88,12 +96,13 @@ class ShoonyaDataIngestor(NorenApi):  # type: ignore[misc]
     # ------------------------------------------------------------------
     # Login
     # ------------------------------------------------------------------
-    def login(self) -> bool:
+    def shoonya_login(self) -> bool:
         """
-        Authenticate using credentials loaded from the .env file.
+        Authenticate using credentials loaded from shoonya.env.
         Returns True on success, False on failure.
         """
-        load_dotenv()
+        _env_path = Path(__file__).resolve().parent / "shoonya.env"
+        load_dotenv(dotenv_path=_env_path, override=True)
 
         user_id = os.getenv("SHOONYA_USER_ID", "")
         password = os.getenv("SHOONYA_PASSWORD", "")
@@ -120,7 +129,7 @@ class ShoonyaDataIngestor(NorenApi):  # type: ignore[misc]
         twoFA = _get_totp(totp_secret)
 
         try:
-            ret = self.api_login(
+            ret = super().login(
                 userid=user_id,
                 password=password,
                 twoFA=twoFA,
@@ -261,7 +270,7 @@ class ShoonyaDataIngestor(NorenApi):  # type: ignore[misc]
     def _reconnect(self) -> None:
         """Re-login and re-open the WebSocket after a disconnection."""
         logger.info("Reconnecting to Shoonya WebSocket…")
-        if self.login():
+        if self.shoonya_login():
             self.start_websocket()
         else:
             logger.error("Reconnect failed: login error.")
@@ -306,7 +315,7 @@ if __name__ == "__main__":
         print("NorenRestApiPy is not installed. Install it first.")
     else:
         ingestor = ShoonyaDataIngestor()
-        if ingestor.login():
+        if ingestor.shoonya_login():
             ingestor.resolve_tokens()
             ingestor.start_websocket()
             # Keep the main thread alive

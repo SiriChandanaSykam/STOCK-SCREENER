@@ -87,7 +87,7 @@ def _get_ingestor():
 
     try:
         ingestor = ShoonyaDataIngestor()
-        if not ingestor.login():
+        if not ingestor.shoonya_login():
             st.sidebar.error("Shoonya login failed — check your .env credentials.")
             return None
 
@@ -162,8 +162,7 @@ def main():
     st.sidebar.markdown(f"**Market Regime (Nifty 50):** {regime}")
     st.sidebar.markdown("---")
     st.sidebar.caption(
-        "Credentials are loaded from the `.env` file. "
-        "See `.env.example` for the required variables."
+        "Credentials are loaded from `shoonya.env`."
     )
 
     # --- Header ------------------------------------------------------------
