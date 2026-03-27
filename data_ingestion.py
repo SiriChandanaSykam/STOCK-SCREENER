@@ -36,6 +36,47 @@ except ImportError:
 from config import SYMBOLS, NSE_EXCHANGE
 
 # ---------------------------------------------------------------------------
+# Dynamic symbol loader — reads target_list.txt written by premarket_filter.py
+# Falls back to config.SYMBOLS when the file is absent.
+# ---------------------------------------------------------------------------
+_TARGET_LIST_PATH = Path(__file__).resolve().parent / "target_list.txt"
+
+
+def load_target_list() -> list[str]:
+    """
+    Read target_list.txt (one 'NSE|SYMBOL-EQ' entry per line).
+    Strip the 'NSE|' prefix and '-EQ' suffix so the raw symbol name
+    (e.g. 'HAPPSTMNDS') is returned — matching the format expected by
+    searchscrip() and the existing tick_data store.
+
+    Falls back to list(SYMBOLS) from config.py if the file does not exist.
+    """
+    if not _TARGET_LIST_PATH.exists():
+        logger.info(
+            "target_list.txt not found — falling back to config.SYMBOLS (%d symbols)",
+            len(SYMBOLS),
+        )
+        return list(SYMBOLS)
+
+    symbols: list[str] = []
+    with open(_TARGET_LIST_PATH, encoding="utf-8") as f:
+        for raw in f:
+            raw = raw.strip()
+            if not raw:
+                continue
+            # Strip exchange prefix and equity suffix
+            sym = raw.removeprefix("NSE|").removesuffix("-EQ")
+            if sym:
+                symbols.append(sym)
+
+    if not symbols:
+        logger.warning("target_list.txt is empty — falling back to config.SYMBOLS")
+        return list(SYMBOLS)
+
+    logger.info("Loaded %d symbols from target_list.txt", len(symbols))
+    return symbols
+
+# ---------------------------------------------------------------------------
 # Module-level logger
 # ---------------------------------------------------------------------------
 logging.basicConfig(
@@ -51,7 +92,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 MAX_TICKS = 390  # one full trading day of 1-min bars
 _tick_lock = Lock()
-tick_data: dict = {sym: deque(maxlen=MAX_TICKS) for sym in SYMBOLS}
+
+# Resolve symbol list once at module import time
+ACTIVE_SYMBOLS: list[str] = load_target_list()
+
+tick_data: dict = {sym: deque(maxlen=MAX_TICKS) for sym in ACTIVE_SYMBOLS}
 
 # WebSocket connection status (True = connected)
 ws_connected: bool = False
@@ -153,10 +198,10 @@ class ShoonyaDataIngestor(NorenApi):  # type: ignore[misc]
     # ------------------------------------------------------------------
     def resolve_tokens(self) -> None:
         """
-        Fetch the scrip token for every symbol in config.SYMBOLS.
+        Fetch the scrip token for every symbol in ACTIVE_SYMBOLS.
         Token is needed to subscribe via WebSocket.
         """
-        for sym in SYMBOLS:
+        for sym in ACTIVE_SYMBOLS:
             try:
                 resp = self.searchscrip(exchange=NSE_EXCHANGE, searchtext=sym)
                 if resp and resp.get("stat") == "Ok":

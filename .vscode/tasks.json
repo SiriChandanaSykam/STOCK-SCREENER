@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Screener",
+			"type": "shell",
+			"command": "& 'C:/Users/gamer/Downloads/shoonya screeener/STOCK-SCREENER/.venv/Scripts/streamlit.exe' run app.py",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}
